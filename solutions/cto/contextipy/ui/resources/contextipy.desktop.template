@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Contextipy
+GenericName=Context-Aware Productivity Assistant
+Comment=A system tray application for managing workspaces and environments
+Exec={INSTALL_PATH}/contextipy
+Icon={INSTALL_PATH}/contextipy/ui/resources/icons/app_icon.svg
+Terminal=false
+Categories=Utility;Development;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true

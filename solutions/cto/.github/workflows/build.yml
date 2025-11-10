@@ -1,0 +1,264 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ main, develop, 'feat-*', 'chore/*' ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Lint (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    
+    - name: Install Poetry
+      run: |
+        pip install poetry
+    
+    - name: Install dependencies
+      run: |
+        poetry install
+    
+    - name: Run Ruff linting
+      run: |
+        poetry run ruff check contextipy
+    
+    - name: Run Ruff formatting check
+      run: |
+        poetry run ruff format --check contextipy
+    
+    - name: Run Mypy type checking
+      run: |
+        poetry run mypy contextipy
+
+  test:
+    name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ['3.10', '3.11']
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install system dependencies (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libgl1-mesa-dev \
+          libglib2.0-0 \
+          libdbus-1-3 \
+          libxcb-xinerama0 \
+          libxcb-cursor0 \
+          xvfb
+    
+    - name: Install Poetry
+      run: |
+        pip install poetry
+    
+    - name: Install dependencies
+      run: |
+        poetry install
+    
+    - name: Run tests with coverage (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        xvfb-run -a poetry run pytest
+      env:
+        QT_QPA_PLATFORM: offscreen
+    
+    - name: Run tests with coverage (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        poetry run pytest
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      if: matrix.python-version == '3.10'
+      with:
+        file: ./coverage.xml
+        flags: ${{ runner.os }}
+        name: ${{ runner.os }}-py${{ matrix.python-version }}
+      continue-on-error: true
+  build-windows:
+    name: Build Windows Executable
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    
+    - name: Install Poetry
+      run: |
+        pip install poetry
+    
+    - name: Install dependencies
+      run: |
+        poetry install
+    
+    - name: Install PyInstaller
+      run: |
+        poetry run pip install pyinstaller
+    
+    - name: Build Windows executable
+      run: |
+        poetry run python scripts/build.py --platform windows --clean
+    
+    - name: Run smoke test
+      run: |
+        poetry run python scripts/build.py --platform windows --smoke-test
+      continue-on-error: true
+    
+    - name: Check executable exists
+      run: |
+        if (Test-Path "dist/Contextipy.exe") {
+          Write-Host "✅ Executable found"
+          $size = (Get-Item "dist/Contextipy.exe").Length / 1MB
+          Write-Host "   Size: $size MB"
+        } else {
+          Write-Host "❌ Executable not found"
+          exit 1
+        }
+      shell: pwsh
+    
+    - name: Upload Windows executable
+      uses: actions/upload-artifact@v4
+      with:
+        name: contextipy-windows
+        path: dist/Contextipy.exe
+        retention-days: 30
+    
+    - name: Upload build logs
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs-windows
+        path: |
+          build/
+          specs/
+        retention-days: 7
+
+  build-linux:
+    name: Build Linux Binary
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          libgl1-mesa-dev \
+          libglib2.0-0 \
+          libdbus-1-3 \
+          libxcb-xinerama0 \
+          libxcb-cursor0
+    
+    - name: Install Poetry
+      run: |
+        pip install poetry
+    
+    - name: Install dependencies
+      run: |
+        poetry install
+    
+    - name: Install PyInstaller
+      run: |
+        poetry run pip install pyinstaller
+    
+    - name: Build Linux binary
+      run: |
+        poetry run python scripts/build.py --platform linux --clean
+    
+    - name: Run smoke test
+      run: |
+        poetry run python scripts/build.py --platform linux --smoke-test
+      continue-on-error: true
+    
+    - name: Check binary exists
+      run: |
+        if [ -f "dist/contextipy" ]; then
+          echo "✅ Binary found"
+          size=$(du -h dist/contextipy | cut -f1)
+          echo "   Size: $size"
+        else
+          echo "❌ Binary not found"
+          exit 1
+        fi
+    
+    - name: Upload Linux binary
+      uses: actions/upload-artifact@v4
+      with:
+        name: contextipy-linux
+        path: dist/contextipy
+        retention-days: 30
+    
+    - name: Upload build logs
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs-linux
+        path: |
+          build/
+          specs/
+        retention-days: 7
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    
+    - name: Install Poetry
+      run: |
+        pip install poetry
+    
+    - name: Install dependencies
+      run: |
+        poetry install
+    
+    - name: Run tests
+      run: |
+        poetry run pytest
