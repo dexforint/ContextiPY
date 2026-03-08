@@ -203,7 +203,6 @@ dependencies = [
  "serde",
  "serde_json",
  "windows",
- "windows-core",
 ]
 
 [[package]]

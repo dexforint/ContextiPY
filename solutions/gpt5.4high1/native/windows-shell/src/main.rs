@@ -2,12 +2,17 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
+use serde_json::json;
 
-use pcontext_bridge::bridge::{
-    build_shell_context, get_endpoint, invoke_menu, list_services, ping, query_menu, reload_registry,
-    response_to_compact_menu_lines, response_to_json, start_service, stop_service,
+use pcontext_native::bridge::{
+    background_native_test, background_run_single_match, background_show_menu, build_shell_context,
+    get_endpoint, invoke_menu, list_services, ping, query_menu, reload_registry,
+    response_to_compact_menu_lines, response_to_json, selection_native_test,
+    selection_run_single_match, selection_show_menu, start_service, stop_service,
+    SingleMatchExecution,
 };
-use pcontext_bridge::ipc::resolve_agent_endpoint_path;
+use pcontext_native::dev_support::doctor_report;
+use pcontext_native::ipc::resolve_agent_endpoint_path;
 
 #[derive(Debug, Parser)]
 #[command(name = "pcontext-bridge")]
@@ -23,6 +28,7 @@ enum Command {
     PrintEndpointPath,
     ShowEndpoint,
     Ping,
+    Doctor,
     ReloadRegistry,
     ListServices,
     StartService(ServiceArgs),
@@ -30,6 +36,12 @@ enum Command {
     QueryMenu(ContextArgs),
     QueryMenuCompact(ContextArgs),
     InvokeMenu(InvokeArgs),
+    BackgroundNativeTest(BackgroundArgs),
+    BackgroundShowMenu(BackgroundArgs),
+    BackgroundRunSingleMatch(BackgroundArgs),
+    SelectionNativeTest(SelectionArgs),
+    SelectionShowMenu(SelectionArgs),
+    SelectionRunSingleMatch(SelectionArgs),
 }
 
 #[derive(Debug, Clone, Args)]
@@ -52,6 +64,18 @@ struct InvokeArgs {
 #[derive(Debug, Clone, Args)]
 struct ServiceArgs {
     service_id: String,
+}
+
+#[derive(Debug, Clone, Args)]
+struct BackgroundArgs {
+    #[arg(long)]
+    background: PathBuf,
+}
+
+#[derive(Debug, Clone, Args)]
+struct SelectionArgs {
+    #[arg(long)]
+    path: PathBuf,
 }
 
 fn print_pretty_json(value: &serde_json::Value) -> Result<()> {
@@ -80,6 +104,11 @@ fn run() -> Result<()> {
         Command::Ping => {
             let response = ping()?;
             let value = response_to_json(&response);
+            print_pretty_json(&value)
+        }
+
+        Command::Doctor => {
+            let value = doctor_report()?;
             print_pretty_json(&value)
         }
 
@@ -133,6 +162,52 @@ fn run() -> Result<()> {
             let value = response_to_json(&response);
             print_pretty_json(&value)
         }
+
+        Command::BackgroundNativeTest(background_args) => {
+            background_native_test(&background_args.background)
+        }
+
+        Command::BackgroundShowMenu(background_args) => {
+            let response = background_show_menu(&background_args.background)?;
+            let value = response_to_json(&response);
+            print_pretty_json(&value)
+        }
+
+        Command::BackgroundRunSingleMatch(background_args) => {
+            let value = single_match_to_json(background_run_single_match(&background_args.background)?);
+            print_pretty_json(&value)
+        }
+
+        Command::SelectionNativeTest(selection_args) => {
+            selection_native_test(&selection_args.path)
+        }
+
+        Command::SelectionShowMenu(selection_args) => {
+            let response = selection_show_menu(&selection_args.path)?;
+            let value = response_to_json(&response);
+            print_pretty_json(&value)
+        }
+
+        Command::SelectionRunSingleMatch(selection_args) => {
+            let value = single_match_to_json(selection_run_single_match(&selection_args.path)?);
+            print_pretty_json(&value)
+        }
+    }
+}
+
+fn single_match_to_json(result: SingleMatchExecution) -> serde_json::Value {
+    match result {
+        SingleMatchExecution::Invoked(response) => response_to_json(&response),
+        SingleMatchExecution::NoMatches(message) => json!({
+            "kind": "run_single_match_result",
+            "status": "no_matches",
+            "message": message,
+        }),
+        SingleMatchExecution::MultipleMatches(items) => json!({
+            "kind": "run_single_match_result",
+            "status": "multiple_matches",
+            "items": items,
+        }),
     }
 }
 

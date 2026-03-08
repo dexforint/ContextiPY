@@ -47,6 +47,17 @@ pub struct ServiceDescriptor {
     pub script_count: u32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WindowsShellDevConfig {
+    pub gui_executable: String,
+    pub gui_args: Vec<String>,
+    pub working_directory: Option<String>,
+    pub auto_start_gui_if_missing: bool,
+    pub launcher_exe: Option<String>,
+    pub icon_path: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct PingRequest {
     pub kind: &'static str,
@@ -99,6 +110,26 @@ pub struct StopServiceRequest {
     pub protocol_version: u32,
     pub token: String,
     pub service_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OpenMenuChooserRequest {
+    pub kind: &'static str,
+    pub protocol_version: u32,
+    pub token: String,
+    pub context: ShellContext,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RecordLauncherEventRequest {
+    pub kind: &'static str,
+    pub protocol_version: u32,
+    pub token: String,
+    pub event_id: String,
+    pub title: String,
+    pub message: String,
+    pub success: bool,
+    pub context: Option<ShellContext>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -168,5 +199,21 @@ pub enum ResponseMessage {
         accepted: bool,
         running: bool,
         message: String,
+    },
+
+    #[serde(rename = "open_menu_chooser_result")]
+    OpenMenuChooserResult {
+        ok: bool,
+        protocol_version: u32,
+        cancelled: bool,
+        accepted: bool,
+        message: String,
+    },
+
+    #[serde(rename = "record_launcher_event_result")]
+    RecordLauncherEventResult {
+        ok: bool,
+        protocol_version: u32,
+        recorded: bool,
     },
 }

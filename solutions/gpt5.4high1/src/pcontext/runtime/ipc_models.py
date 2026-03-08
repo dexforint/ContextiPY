@@ -139,6 +139,32 @@ class StopServiceRequest(StrictModel):
     service_id: str
 
 
+class OpenMenuChooserRequest(StrictModel):
+    """
+    Просит агент открыть GUI-chooser и затем выполнить выбранную команду.
+    """
+
+    kind: Literal["open_menu_chooser"] = "open_menu_chooser"
+    protocol_version: Literal[1] = PROTOCOL_VERSION
+    token: str
+    context: ShellContext
+
+
+class RecordLauncherEventRequest(StrictModel):
+    """
+    Просит агент записать launcher-вызов в общие логи PContext.
+    """
+
+    kind: Literal["record_launcher_event"] = "record_launcher_event"
+    protocol_version: Literal[1] = PROTOCOL_VERSION
+    token: str
+    event_id: str
+    title: str
+    message: str
+    success: bool
+    context: ShellContext | None = None
+
+
 RequestMessage: TypeAlias = Annotated[
     PingRequest
     | QueryMenuRequest
@@ -147,7 +173,9 @@ RequestMessage: TypeAlias = Annotated[
     | ListServicesRequest
     | StartServiceRequest
     | StopServiceRequest
-    | AskUserRequest,
+    | AskUserRequest
+    | OpenMenuChooserRequest
+    | RecordLauncherEventRequest,
     Field(discriminator="kind"),
 ]
 
@@ -220,6 +248,30 @@ class StopServiceResponse(StrictModel):
     message: str
 
 
+class OpenMenuChooserResponse(StrictModel):
+    """
+    Результат GUI-chooser запроса.
+    """
+
+    kind: Literal["open_menu_chooser_result"] = "open_menu_chooser_result"
+    ok: Literal[True] = True
+    protocol_version: Literal[1] = PROTOCOL_VERSION
+    cancelled: bool
+    accepted: bool
+    message: str
+
+
+class RecordLauncherEventResponse(StrictModel):
+    """
+    Ответ после записи launcher-события в лог.
+    """
+
+    kind: Literal["record_launcher_event_result"] = "record_launcher_event_result"
+    ok: Literal[True] = True
+    protocol_version: Literal[1] = PROTOCOL_VERSION
+    recorded: bool
+
+
 ResponseMessage: TypeAlias = Annotated[
     ErrorResponse
     | PingResponse
@@ -229,7 +281,9 @@ ResponseMessage: TypeAlias = Annotated[
     | ListServicesResponse
     | StartServiceResponse
     | StopServiceResponse
-    | AskUserResponse,
+    | AskUserResponse
+    | OpenMenuChooserResponse
+    | RecordLauncherEventResponse,
     Field(discriminator="kind"),
 ]
 

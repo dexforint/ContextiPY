@@ -135,6 +135,8 @@ class ServiceManager:
         """
         Запускает новый service-host процесс.
         """
+        from pcontext.runtime.python_env import build_subprocess_env
+
         process = subprocess.Popen(
             [sys.executable, "-m", "pcontext.runner.service_worker"],
             stdin=subprocess.PIPE,
@@ -143,6 +145,7 @@ class ServiceManager:
             text=True,
             encoding="utf-8",
             bufsize=1,
+            env=build_subprocess_env(self._scripts_root.parent),
         )
 
         return _ServiceProcessHandle(

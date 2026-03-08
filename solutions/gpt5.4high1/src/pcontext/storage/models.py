@@ -11,9 +11,6 @@ OwnerKind = Literal["oneshot_script", "service", "service_script"]
 class ParameterValueView:
     """
     Текущее состояние одного настраиваемого параметра.
-
-    Этот объект удобен для CLI и будущего GUI:
-    он уже содержит и default, и текущее сохранённое значение.
     """
 
     owner_kind: OwnerKind
@@ -33,7 +30,7 @@ class RunLogRecord:
 
     log_id: int
     created_at_utc: str
-    invocation_kind: Literal["oneshot_script", "service_script"]
+    invocation_kind: Literal["oneshot_script", "service_script", "launcher"]
     command_id: str
     title: str
     duration_ms: int | None
@@ -41,3 +38,29 @@ class RunLogRecord:
     message: str
     action_json: str | None
     context_json: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class RegistrationModuleRecord:
+    """
+    Снимок регистрации одного Python-файла из папки scripts.
+    """
+
+    relative_path: str
+    source_file: str
+    file_hash_sha256: str
+    dependencies: list[str]
+    status: Literal["registered", "error"]
+    error_message: str | None
+    updated_at_utc: str
+
+
+@dataclass(frozen=True, slots=True)
+class CommandUsageStats:
+    """
+    Статистика использования конкретной команды.
+    """
+
+    command_id: str
+    launch_count: int
+    last_used_utc: str | None

@@ -13,6 +13,7 @@ from pcontext.gui.ask_bridge import GuiAskBridge
 from pcontext.gui.backend import GuiBackend
 from pcontext.gui.icons import load_application_icon
 from pcontext.gui.main_window import MainWindow
+from pcontext.gui.menu_bridge import GuiMenuBridge
 from pcontext.runtime.action_executor import (
     ActionExecutionHooks,
     clear_action_execution_hooks,
@@ -22,6 +23,11 @@ from pcontext.runtime.ask_runtime import (
     AskExecutionHooks,
     clear_ask_execution_hooks,
     install_ask_execution_hooks,
+)
+from pcontext.runtime.menu_runtime import (
+    MenuExecutionHooks,
+    clear_menu_execution_hooks,
+    install_menu_execution_hooks,
 )
 
 
@@ -56,6 +62,7 @@ def run_gui(paths: PContextPaths | None = None) -> int:
         tray_icon=tray_icon, backend=backend, parent=application
     )
     ask_bridge = GuiAskBridge(parent=application)
+    menu_bridge = GuiMenuBridge(backend=backend, parent=application)
 
     install_action_execution_hooks(
         ActionExecutionHooks(
@@ -68,6 +75,11 @@ def run_gui(paths: PContextPaths | None = None) -> int:
             ask_user=ask_bridge.ask_user,
         )
     )
+    install_menu_execution_hooks(
+        MenuExecutionHooks(
+            choose_menu_item=menu_bridge.choose_menu_item,
+        )
+    )
 
     tray_icon.show()
     window.show()
@@ -75,6 +87,7 @@ def run_gui(paths: PContextPaths | None = None) -> int:
     try:
         return application.exec()
     finally:
+        clear_menu_execution_hooks()
         clear_ask_execution_hooks()
         clear_action_execution_hooks()
         tray_icon.hide()

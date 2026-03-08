@@ -6,6 +6,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 
 function Remove-RegistryTreeIfExists {
     param(
@@ -38,7 +39,6 @@ function Remove-RegistryValueIfExists {
         Write-Host "Value removed '$Name' from: $Path"
     }
     catch {
-        # Значение уже отсутствует — это нормально.
     }
 }
 
@@ -63,6 +63,10 @@ $keysToRemove = @(
 
     "$registryPrefix\Software\Classes\Directory\Background\shellex\ContextMenuHandlers\PContext.Dev",
 
+    "$registryPrefix\Software\Classes\Directory\Background\shell\PContext.Dev",
+    "$registryPrefix\Software\Classes\*\shell\PContext.Dev",
+    "$registryPrefix\Software\Classes\Directory\shell\PContext.Dev",
+
     "$registryPrefix\Software\Classes\CLSID\$legacyClsid",
     "$registryPrefix\Software\Classes\CLSID\$devClsid"
 )
@@ -81,6 +85,24 @@ if (Test-Path -LiteralPath $journalPath) {
     Write-Host "Удалён journal: $journalPath"
 }
 
+$backgroundJournalPath = Join-Path $HOME ".pcontext\runtime\windows-background-dev-registration.json"
+if (Test-Path -LiteralPath $backgroundJournalPath) {
+    Remove-Item -LiteralPath $backgroundJournalPath -Force
+    Write-Host "Удалён journal: $backgroundJournalPath"
+}
+
+$configPath = Join-Path $HOME ".pcontext\runtime\windows-shell-dev-config.json"
+if (Test-Path -LiteralPath $configPath) {
+    Remove-Item -LiteralPath $configPath -Force
+    Write-Host "Удалён config: $configPath"
+}
+
+$launcherLogPath = Join-Path $HOME ".pcontext\runtime\windows-launcher.log"
+if (Test-Path -LiteralPath $launcherLogPath) {
+    Remove-Item -LiteralPath $launcherLogPath -Force
+    Write-Host "Удалён log: $launcherLogPath"
+}
+
 if ($PurgePContextState) {
     $pcontextHome = Join-Path $HOME ".pcontext"
 
@@ -94,7 +116,7 @@ if ($PurgePContextState) {
     foreach ($path in $pathsToRemove) {
         if (Test-Path -LiteralPath $path) {
             Remove-Item -LiteralPath $path -Recurse -Force
-            Write-Host "Removed PContext state: $path"
+            Write-Host "Удалено состояние PContext: $path"
         }
     }
 }

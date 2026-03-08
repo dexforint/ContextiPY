@@ -12,6 +12,7 @@ from pcontext.agent.catalog import load_agent_catalog
 from pcontext.agent.server import serve_agent
 from pcontext.config import ensure_directories, get_paths
 from pcontext.gui.app import run_gui
+from pcontext.registrar.registration import register_scripts
 from pcontext.registrar.subprocess_runner import (
     inspect_script_file_in_subprocess,
     scan_scripts_in_subprocess,
@@ -153,6 +154,10 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("agent", help="Запустить IPC-агент в foreground-режиме.")
     subparsers.add_parser("gui", help="Запустить tray и GUI приложения.")
     subparsers.add_parser("agent-ping", help="Проверить, что агент отвечает.")
+    subparsers.add_parser(
+        "register",
+        help="Создать общее venv, установить зависимости и обновить снимок регистрации.",
+    )
     subparsers.add_parser(
         "reload-registry",
         help="Попросить агент пересканировать папку пользовательских скриптов.",
@@ -304,6 +309,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             endpoint = read_agent_endpoint(paths.agent_endpoint)
             response = send_request(endpoint, PingRequest(token=endpoint.token))
             _print_json(response.model_dump(mode="json"))
+            return 0
+
+        if namespace.command == "register":
+            paths = get_paths()
+            ensure_directories(paths)
+            result = register_scripts(paths, state_store=_load_state_store())
+            _print_json(
+                {
+                    "processed_files": result.processed_files,
+                    "changed_files": result.changed_files,
+                    "unchanged_files": result.unchanged_files,
+                    "removed_files": result.removed_files,
+                    "failed_files": result.failed_files,
+                    "installed_dependency_groups": result.installed_dependency_groups,
+                    "venv_created": result.venv_created,
+                }
+            )
             return 0
 
         if namespace.command == "reload-registry":

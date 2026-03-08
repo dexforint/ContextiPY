@@ -16,11 +16,12 @@ from pcontext.runner.models import ExecutionErrorResponse, OneshotExecutionReque
 from pcontext.runner.subprocess_runner import execute_oneshot_in_subprocess
 from pcontext.runtime.action_codec import describe_serialized_action
 from pcontext.runtime.action_executor import execute_serialized_action
-from pcontext.runtime.ipc_models import ShellContext, ShellEntry
+from pcontext.runtime.ipc_models import MenuItemDescriptor, ShellContext, ShellEntry
 from pcontext.runtime.matching import (
     build_visible_menu_items_from_manifest_commands,
     matches_manifest_input_rules,
 )
+from pcontext.runtime.menu_runtime import ChooserItem
 from pcontext.runtime.shell import InvocationContext
 from pcontext.storage.state import StateStore
 
@@ -126,9 +127,9 @@ class LiveRegistry:
         """
         return self._service_manager.stop_service(service_id)
 
-    def list_menu_items(self, context: InvocationContext) -> list[object]:
+    def list_menu_items(self, context: InvocationContext) -> list[MenuItemDescriptor]:
         """
-        Возвращает список видимых пунктов меню для конкретного shell-контекста.
+        Возвращает список видимых пунктов меню для shell-контекста.
         """
         with self._lock:
             commands = self._catalog.context_commands
@@ -138,6 +139,107 @@ class LiveRegistry:
             context,
             is_service_running=self._service_manager.is_running,
         )
+
+    def list_chooser_items(self, context: InvocationContext) -> list[ChooserItem]:
+        """
+        Возвращает расширенный список команд для GUI chooser.
+        """
+        with self._lock:
+            commands = self._catalog.context_commands
+            oneshot_map = {item.id: item for item in self._catalog.oneshot_scripts}
+            service_method_map: dict[str, tuple[str, ServiceScriptManifest]] = {}
+
+            for service in self._catalog.services:
+                for method in service.scripts:
+                    service_method_map[method.id] = (service.title, method)
+
+        visible_commands = build_visible_menu_items_from_manifest_commands(
+            commands,
+            context,
+            is_service_running=self._service_manager.is_running,
+        )
+
+        visible_ids = [item.id for item in visible_commands]
+        usage_map = self._state_store.list_command_usage_stats(visible_ids)
+        registration_map = {
+            item.relative_path: item
+            for item in self._state_store.list_registration_modules()
+        }
+
+        chooser_items: list[ChooserItem] = []
+
+        for menu_item in visible_commands:
+            oneshot_manifest = oneshot_map.get(menu_item.id)
+            if oneshot_manifest is not None:
+                registration_record = registration_map.get(
+                    oneshot_manifest.relative_path
+                )
+                usage_stats = usage_map.get(menu_item.id)
+
+                chooser_items.append(
+                    ChooserItem(
+                        id=menu_item.id,
+                        title=menu_item.title,
+                        description=oneshot_manifest.description,
+                        kind="oneshot_script",
+                        service_title=None,
+                        updated_at_utc=(
+                            registration_record.updated_at_utc
+                            if registration_record
+                            else None
+                        ),
+                        launch_count=usage_stats.launch_count if usage_stats else 0,
+                        last_used_utc=(
+                            usage_stats.last_used_utc if usage_stats else None
+                        ),
+                        enabled=menu_item.enabled,
+                        has_parameters=bool(oneshot_manifest.params),
+                        icon_name=oneshot_manifest.icon,
+                        registration_status=(
+                            registration_record.status
+                            if registration_record is not None
+                            else "untracked"
+                        ),
+                    )
+                )
+                continue
+
+            service_method_info = service_method_map.get(menu_item.id)
+            if service_method_info is not None:
+                service_title, method_manifest = service_method_info
+                registration_record = registration_map.get(
+                    method_manifest.relative_path
+                )
+                usage_stats = usage_map.get(menu_item.id)
+
+                chooser_items.append(
+                    ChooserItem(
+                        id=menu_item.id,
+                        title=menu_item.title,
+                        description=method_manifest.description,
+                        kind="service_script",
+                        service_title=service_title,
+                        updated_at_utc=(
+                            registration_record.updated_at_utc
+                            if registration_record
+                            else None
+                        ),
+                        launch_count=usage_stats.launch_count if usage_stats else 0,
+                        last_used_utc=(
+                            usage_stats.last_used_utc if usage_stats else None
+                        ),
+                        enabled=menu_item.enabled,
+                        has_parameters=bool(method_manifest.params),
+                        icon_name=method_manifest.icon,
+                        registration_status=(
+                            registration_record.status
+                            if registration_record is not None
+                            else "untracked"
+                        ),
+                    )
+                )
+
+        return chooser_items
 
     def _find_oneshot_script(self, menu_item_id: str) -> OneshotScriptManifest | None:
         """
@@ -419,9 +521,6 @@ class LiveRegistry:
     def invoke_direct(self, owner_id: str) -> MenuInvocationResult:
         """
         Запускает скрипт или service.script без shell-контекста.
-
-        Этот метод нужен для GUI-кнопки "Запустить" у сценариев,
-        которые не требуют входных файлов.
         """
         oneshot_manifest = self._find_oneshot_script(owner_id)
         if oneshot_manifest is not None:

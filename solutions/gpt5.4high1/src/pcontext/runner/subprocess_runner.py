@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
 
 from pcontext.runner.models import (
     EXECUTION_RESPONSE_ADAPTER,
@@ -9,6 +10,7 @@ from pcontext.runner.models import (
     ExecutionResponse,
     OneshotExecutionRequest,
 )
+from pcontext.runtime.python_env import build_subprocess_env
 
 
 def execute_oneshot_in_subprocess(
@@ -23,12 +25,15 @@ def execute_oneshot_in_subprocess(
         "pcontext.runner.worker",
     ]
 
+    scripts_root = Path(request.scripts_root).expanduser().resolve()
+
     completed = subprocess.run(
         command,
         input=request.model_dump_json(indent=2),
         text=True,
         capture_output=True,
         check=False,
+        env=build_subprocess_env(scripts_root.parent),
     )
 
     if completed.returncode != 0:

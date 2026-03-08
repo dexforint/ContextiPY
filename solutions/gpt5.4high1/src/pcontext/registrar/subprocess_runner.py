@@ -6,6 +6,7 @@ from pathlib import Path
 
 from pcontext.registrar.introspection import discover_python_files
 from pcontext.registrar.models import ModuleInspectionResult
+from pcontext.runtime.python_env import build_subprocess_env
 
 
 def inspect_script_file_in_subprocess(
@@ -15,11 +16,6 @@ def inspect_script_file_in_subprocess(
 ) -> ModuleInspectionResult:
     """
     Анализирует один скрипт в отдельном Python-процессе.
-
-    Это важно, потому что пользовательский модуль может:
-    - импортировать тяжёлые библиотеки;
-    - менять глобальное состояние;
-    - аварийно завершаться при импорте.
     """
     command = [
         sys.executable,
@@ -35,6 +31,7 @@ def inspect_script_file_in_subprocess(
         capture_output=True,
         text=True,
         check=False,
+        env=build_subprocess_env(scripts_root.parent),
     )
 
     if completed.returncode != 0:

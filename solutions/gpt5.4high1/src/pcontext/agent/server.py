@@ -21,11 +21,15 @@ from pcontext.runtime.ipc_models import (
     InvokeMenuItemResponse,
     ListServicesRequest,
     ListServicesResponse,
+    OpenMenuChooserRequest,
+    OpenMenuChooserResponse,
     PingRequest,
     PingResponse,
     QueryMenuRequest,
     QueryMenuResponse,
     REQUEST_ADAPTER,
+    RecordLauncherEventRequest,
+    RecordLauncherEventResponse,
     ReloadRegistryRequest,
     ReloadRegistryResponse,
     RequestMessage,
@@ -36,6 +40,7 @@ from pcontext.runtime.ipc_models import (
     StopServiceRequest,
     StopServiceResponse,
 )
+from pcontext.runtime.menu_runtime import request_menu_choice
 from pcontext.runtime.question_models import AskUserRequest, AskUserResponse
 from pcontext.runtime.shell import normalize_shell_context
 from pcontext.storage.state import StateStore
@@ -70,6 +75,13 @@ class AgentApplication:
         Возвращает SQLite-хранилище состояния.
         """
         return self._state_store
+
+    @property
+    def paths(self) -> PContextPaths:
+        """
+        Возвращает набор путей приложения.
+        """
+        return self._paths
 
     def close(self) -> None:
         """
@@ -182,6 +194,52 @@ class AgentApplication:
                 cancelled=answers is None,
                 answers={} if answers is None else answers,
             )
+
+        if isinstance(request, OpenMenuChooserRequest):
+            context = normalize_shell_context(request.context)
+            items = self._registry.list_chooser_items(context)
+
+            if not items:
+                return OpenMenuChooserResponse(
+                    cancelled=False,
+                    accepted=False,
+                    message="Подходящие команды не найдены.",
+                )
+
+            selected_id = request_menu_choice(
+                request.context.current_folder,
+                items,
+            )
+            if selected_id is None:
+                return OpenMenuChooserResponse(
+                    cancelled=True,
+                    accepted=False,
+                    message="Выбор команды отменён.",
+                )
+
+            result = self._registry.invoke(selected_id, context)
+            return OpenMenuChooserResponse(
+                cancelled=False,
+                accepted=result.accepted,
+                message=result.message,
+            )
+
+        if isinstance(request, RecordLauncherEventRequest):
+            self._state_store.add_run_log(
+                invocation_kind="launcher",
+                command_id=request.event_id,
+                title=request.title,
+                duration_ms=None,
+                success=request.success,
+                message=request.message,
+                action_json=None,
+                context_json=(
+                    request.context.model_dump_json()
+                    if request.context is not None
+                    else None
+                ),
+            )
+            return RecordLauncherEventResponse(recorded=True)
 
         return ErrorResponse(
             error_code="unsupported_request",

@@ -5,10 +5,24 @@ from typing import Any, Literal
 
 from pcontext.agent.server import AgentApplication
 from pcontext.agent.service_manager import ServiceControlResult, ServiceStatusView
+from pcontext.config import ensure_directories
+from pcontext.gui.windows_shell_diagnostics import (
+    WindowsShellDiagnostics,
+    collect_windows_shell_diagnostics,
+)
 from pcontext.registrar.models import ParamArgumentManifest
-from pcontext.runtime.action_codec import SERIALIZED_ACTION_ADAPTER
+from pcontext.registrar.registration import register_scripts
+from pcontext.runtime.action_codec import (
+    FolderActionModel,
+    OpenAction,
+    SERIALIZED_ACTION_ADAPTER,
+)
 from pcontext.runtime.action_executor import execute_serialized_action
-from pcontext.storage.models import RunLogRecord
+from pcontext.runtime.python_env import (
+    get_shared_venv_python,
+    get_shared_venv_site_packages,
+)
+from pcontext.storage.models import RegistrationModuleRecord, RunLogRecord
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +55,18 @@ class ParameterOwnerDetails:
     current_values: dict[str, Any]
 
 
+@dataclass(frozen=True, slots=True)
+class SharedVenvStatus:
+    """
+    Сводка по общему виртуальному окружению PContext.
+    """
+
+    venv_dir: str
+    python_executable: str
+    site_packages_dir: str
+    exists: bool
+
+
 class GuiBackend:
     """
     Небольшой фасад над AgentApplication для GUI-слоя.
@@ -48,6 +74,10 @@ class GuiBackend:
 
     SETTINGS_AUTOSTART = "settings.launch_on_startup"
     SETTINGS_DISABLE_NOTIFICATIONS = "settings.disable_notifications"
+
+    SETTINGS_CHOOSER_SORT = "chooser.sort_mode"
+    SETTINGS_CHOOSER_GEOMETRY = "chooser.geometry"
+    SETTINGS_CHOOSER_COLUMN_WIDTHS = "chooser.column_widths"
 
     def __init__(self, application: AgentApplication) -> None:
         self._application = application
@@ -59,12 +89,87 @@ class GuiBackend:
         """
         return self._application
 
+    def register_and_reload(self) -> tuple[int, int, int, int, int, int, bool]:
+        """
+        Выполняет полную регистрацию скриптов и затем перегружает каталог агента.
+        """
+        registration_result = register_scripts(
+            self._application.paths,
+            state_store=self._application.state_store,
+        )
+        self._application.registry.reload()
+
+        return (
+            registration_result.processed_files,
+            registration_result.changed_files,
+            registration_result.unchanged_files,
+            registration_result.removed_files,
+            registration_result.failed_files,
+            registration_result.installed_dependency_groups,
+            registration_result.venv_created,
+        )
+
     def reload_registry(self) -> tuple[int, int, int]:
         """
-        Перезагружает каталог пользовательских скриптов.
+        Только перегружает каталог пользовательских скриптов.
         """
         result = self._application.registry.reload()
         return result.command_count, result.service_count, result.failure_count
+
+    def open_scripts_folder(self) -> str:
+        """
+        Открывает папку пользовательских скриптов.
+        """
+        ensure_directories(self._application.paths)
+        return execute_serialized_action(
+            FolderActionModel(path=str(self._application.paths.scripts))
+        )
+
+    def open_runtime_folder(self) -> str:
+        """
+        Открывает runtime-папку PContext.
+        """
+        ensure_directories(self._application.paths)
+        return execute_serialized_action(
+            FolderActionModel(path=str(self._application.paths.runtime))
+        )
+
+    def open_launcher_log(self) -> str:
+        """
+        Открывает launcher log в приложении по умолчанию.
+        """
+        ensure_directories(self._application.paths)
+        log_path = self._application.paths.runtime / "windows-launcher.log"
+        log_path.touch(exist_ok=True)
+
+        return execute_serialized_action(OpenAction(path=str(log_path)))
+
+    def get_windows_shell_diagnostics(self) -> WindowsShellDiagnostics:
+        """
+        Возвращает сводку по Windows shell dev-layer.
+        """
+        return collect_windows_shell_diagnostics(self._application.paths)
+
+    def get_shared_venv_status(self) -> SharedVenvStatus:
+        """
+        Возвращает состояние общего виртуального окружения.
+        """
+        base_dir = self._application.paths.home
+        python_path = get_shared_venv_python(base_dir)
+        site_packages_path = get_shared_venv_site_packages(base_dir)
+
+        return SharedVenvStatus(
+            venv_dir=str(self._application.paths.venv),
+            python_executable=str(python_path),
+            site_packages_dir=str(site_packages_path),
+            exists=python_path.is_file(),
+        )
+
+    def list_registration_modules(self) -> list[RegistrationModuleRecord]:
+        """
+        Возвращает снимки регистрации всех известных файлов scripts.
+        """
+        return self._application.state_store.list_registration_modules()
 
     def list_services(self) -> list[ServiceStatusView]:
         """
@@ -86,7 +191,7 @@ class GuiBackend:
 
     def list_script_items(self) -> list[ScriptListItem]:
         """
-        Возвращает все скрипты и service.script-методы в удобном виде для таблицы GUI.
+        Возвращает все скрипты и service.script-методы.
         """
         catalog = self._application.registry.catalog
         service_states = {
@@ -186,9 +291,6 @@ class GuiBackend:
     def save_parameter_values(self, owner_id: str, values: dict[str, Any]) -> None:
         """
         Сохраняет параметры сущности.
-
-        Мы сначала сбрасываем старые override-значения, а затем сохраняем
-        только те поля, которые реально отличаются от default.
         """
         details = self.get_parameter_owner(owner_id)
         if details is None:

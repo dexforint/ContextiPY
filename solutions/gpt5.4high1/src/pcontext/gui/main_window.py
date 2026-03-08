@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 from functools import partial
 from typing import cast
 
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QStatusBar,
     QTableWidget,
@@ -27,6 +29,25 @@ from pcontext.agent.service_manager import ServiceControlResult
 from pcontext.config import PContextPaths
 from pcontext.gui.backend import GuiBackend, ScriptListItem
 from pcontext.gui.tasks import BackgroundTask
+from pcontext.storage.models import RegistrationModuleRecord
+
+
+def _format_log_timestamp(raw_value: str) -> tuple[str, str]:
+    """
+    Преобразует ISO-время из UTC в короткий локальный формат для GUI.
+    """
+    try:
+        dt_utc = datetime.fromisoformat(raw_value)
+        dt_local = dt_utc.astimezone()
+
+        display_text = dt_local.strftime("%d.%m.%Y %H:%M:%S")
+        tooltip_text = (
+            f"Локальное время: {dt_local.strftime('%d.%m.%Y %H:%M:%S %Z')}\n"
+            f"UTC: {dt_utc.strftime('%Y-%m-%d %H:%M:%S %z')}"
+        )
+        return display_text, tooltip_text
+    except ValueError:
+        return raw_value, raw_value
 
 
 class ServicesTab(QWidget):
@@ -101,12 +122,6 @@ class ServicesTab(QWidget):
         Запускает или останавливает сервис в фоне.
         """
         self._show_status("Выполняется операция с сервисом...", 0)
-
-        function = lambda: (
-            self._backend.stop_service(service_id)
-            if currently_running
-            else lambda: self._backend.start_service(service_id)
-        )
 
         if currently_running:
             self._run_task(
@@ -263,9 +278,6 @@ class ScriptsTab(QWidget):
     def _invoke_direct(self, owner_id: str) -> None:
         """
         Пытается запустить сценарий без входных файлов в фоне.
-
-        Это важно для Ask(...): GUI-поток должен оставаться свободным,
-        иначе форма вопросов не сможет открыться.
         """
         self._show_status("Сценарий выполняется...", 0)
         self._run_task(
@@ -352,35 +364,72 @@ class SettingsTab(QWidget):
             self,
         )
 
+        self._info_label = QLabel(self)
+        self._info_label.setWordWrap(True)
+
+        self._windows_shell_label = QLabel(self)
+        self._windows_shell_label.setWordWrap(True)
+
+        self._launcher_log_view = QPlainTextEdit(self)
+        self._launcher_log_view.setReadOnly(True)
+        self._launcher_log_view.setMinimumHeight(180)
+
+        self._registration_summary_label = QLabel(self)
+        self._registration_summary_label.setWordWrap(True)
+
+        self._registration_table = QTableWidget(self)
+        self._registration_table.setColumnCount(5)
+        self._registration_table.setHorizontalHeaderLabels(
+            ["Файл", "Статус", "Зависимости", "Ошибка", "Обновлено"]
+        )
+        self._registration_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
+        self._registration_table.verticalHeader().setVisible(False)
+
         save_button = QPushButton("Сохранить настройки", self)
         save_button.clicked.connect(self._save_settings)
 
-        reload_button = QPushButton("Пересканировать скрипты", self)
+        reload_button = QPushButton("Регистрация и обновление", self)
         reload_button.clicked.connect(self._reload_registry)
 
-        info_label = QLabel(
-            f"Папка скриптов: <code>{paths.scripts}</code><br>"
-            f"SQLite: <code>{paths.state_db}</code>"
-        )
-        info_label.setWordWrap(True)
+        open_scripts_button = QPushButton("Открыть папку со скриптами", self)
+        open_scripts_button.clicked.connect(self._open_scripts_folder)
+
+        open_runtime_button = QPushButton("Открыть runtime-папку", self)
+        open_runtime_button.clicked.connect(self._open_runtime_folder)
+
+        open_launcher_log_button = QPushButton("Открыть launcher.log", self)
+        open_launcher_log_button.clicked.connect(self._open_launcher_log)
+
+        refresh_diagnostics_button = QPushButton("Обновить диагностику", self)
+        refresh_diagnostics_button.clicked.connect(self.refresh_data)
 
         buttons_row = QHBoxLayout()
         buttons_row.addWidget(save_button)
         buttons_row.addWidget(reload_button)
+        buttons_row.addWidget(open_scripts_button)
+        buttons_row.addWidget(open_runtime_button)
+        buttons_row.addWidget(open_launcher_log_button)
+        buttons_row.addWidget(refresh_diagnostics_button)
         buttons_row.addStretch(1)
 
         layout = QVBoxLayout(self)
         layout.addWidget(self._autostart_checkbox)
         layout.addWidget(self._disable_notifications_checkbox)
-        layout.addWidget(info_label)
+        layout.addWidget(self._info_label)
         layout.addLayout(buttons_row)
+        layout.addWidget(self._windows_shell_label)
+        layout.addWidget(self._launcher_log_view)
+        layout.addWidget(self._registration_summary_label)
+        layout.addWidget(self._registration_table)
         layout.addStretch(1)
 
         self.refresh_data()
 
     def refresh_data(self) -> None:
         """
-        Загружает сохранённые настройки в виджеты.
+        Загружает сохранённые настройки и диагностическую информацию.
         """
         self._autostart_checkbox.setChecked(
             bool(self._backend.get_setting(GuiBackend.SETTINGS_AUTOSTART, False))
@@ -392,6 +441,83 @@ class SettingsTab(QWidget):
                 )
             )
         )
+
+        venv_status = self._backend.get_shared_venv_status()
+        self._info_label.setText(
+            f"Папка скриптов: <code>{self._paths.scripts}</code><br>"
+            f"Папка иконок: <code>{self._paths.icons}</code><br>"
+            f"Общее venv: <code>{venv_status.venv_dir}</code><br>"
+            f"Python в venv: <code>{venv_status.python_executable}</code><br>"
+            f"site-packages: <code>{venv_status.site_packages_dir}</code><br>"
+            f"venv существует: <b>{'Да' if venv_status.exists else 'Нет'}</b><br>"
+            f"SQLite: <code>{self._paths.state_db}</code>"
+        )
+
+        shell_diag = self._backend.get_windows_shell_diagnostics()
+        self._windows_shell_label.setText(
+            f"Windows shell runtime: <code>{shell_diag.runtime_dir}</code><br>"
+            f"dev-config: <code>{shell_diag.config_path}</code> "
+            f"({'есть' if shell_diag.config_exists else 'нет'})<br>"
+            f"GUI executable: <code>{shell_diag.gui_executable or '—'}</code><br>"
+            f"Launcher exe: <code>{shell_diag.launcher_exe or '—'}</code><br>"
+            f"Автозапуск GUI при отсутствии агента: "
+            f"<b>{'Да' if shell_diag.auto_start_gui_if_missing else 'Нет' if shell_diag.auto_start_gui_if_missing is not None else '—'}</b><br>"
+            f"endpoint: <code>{shell_diag.endpoint_path}</code> "
+            f"({'есть' if shell_diag.endpoint_exists else 'нет'})<br>"
+            f"Агент доступен: <b>{'Да' if shell_diag.agent_available else 'Нет'}</b><br>"
+            f"launcher.log: <code>{shell_diag.launcher_log_path}</code> "
+            f"({'есть' if shell_diag.launcher_log_exists else 'нет'})<br>"
+            f"Ошибка config: <b>{shell_diag.config_error or '—'}</b>"
+        )
+
+        self._launcher_log_view.setPlainText(
+            shell_diag.launcher_log_tail
+            if shell_diag.launcher_log_tail
+            else "launcher.log пуст."
+        )
+
+        modules = self._backend.list_registration_modules()
+        registered_count = sum(1 for item in modules if item.status == "registered")
+        error_count = sum(1 for item in modules if item.status == "error")
+
+        self._registration_summary_label.setText(
+            f"Снимки регистрации: {len(modules)} | Успешно: {registered_count} | Ошибки: {error_count}"
+        )
+
+        self._registration_table.setRowCount(len(modules))
+        for row_index, item in enumerate(modules):
+            self._fill_registration_row(row_index, item)
+
+    def _fill_registration_row(
+        self, row_index: int, item: RegistrationModuleRecord
+    ) -> None:
+        """
+        Заполняет одну строку таблицы регистрации.
+        """
+        file_item = QTableWidgetItem(item.relative_path)
+        file_item.setToolTip(item.source_file)
+        self._registration_table.setItem(row_index, 0, file_item)
+
+        status_text = "OK" if item.status == "registered" else "Ошибка"
+        status_item = QTableWidgetItem(status_text)
+        self._registration_table.setItem(row_index, 1, status_item)
+
+        dependencies_text = ", ".join(item.dependencies) if item.dependencies else "—"
+        dependencies_item = QTableWidgetItem(dependencies_text)
+        dependencies_item.setToolTip(
+            "\n".join(item.dependencies) if item.dependencies else "Нет зависимостей"
+        )
+        self._registration_table.setItem(row_index, 2, dependencies_item)
+
+        error_text = item.error_message or "—"
+        error_item = QTableWidgetItem(error_text)
+        error_item.setToolTip(error_text)
+        self._registration_table.setItem(row_index, 3, error_item)
+
+        display_time, tooltip_time = _format_log_timestamp(item.updated_at_utc)
+        time_item = QTableWidgetItem(display_time)
+        time_item.setToolTip(tooltip_time)
+        self._registration_table.setItem(row_index, 4, time_item)
 
     def _save_settings(self) -> None:
         """
@@ -407,15 +533,51 @@ class SettingsTab(QWidget):
         )
         self._show_status("Настройки сохранены.", 5000)
 
+    def _open_scripts_folder(self) -> None:
+        """
+        Открывает папку пользовательских скриптов.
+        """
+        try:
+            result_message = self._backend.open_scripts_folder()
+        except Exception as error:  # noqa: BLE001
+            QMessageBox.warning(self, "Скрипты", str(error))
+            return
+
+        self._show_status(result_message, 5000)
+
+    def _open_runtime_folder(self) -> None:
+        """
+        Открывает runtime-папку.
+        """
+        try:
+            result_message = self._backend.open_runtime_folder()
+        except Exception as error:  # noqa: BLE001
+            QMessageBox.warning(self, "Runtime", str(error))
+            return
+
+        self._show_status(result_message, 5000)
+
+    def _open_launcher_log(self) -> None:
+        """
+        Открывает launcher.log.
+        """
+        try:
+            result_message = self._backend.open_launcher_log()
+        except Exception as error:  # noqa: BLE001
+            QMessageBox.warning(self, "Launcher log", str(error))
+            return
+
+        self._show_status(result_message, 5000)
+
     def _reload_registry(self) -> None:
         """
-        Перезагружает каталог пользовательских скриптов в фоне.
+        Выполняет полную регистрацию скриптов и затем обновляет каталог GUI.
         """
-        self._show_status("Идёт перерегистрация скриптов...", 0)
+        self._show_status("Идёт регистрация скриптов и зависимостей...", 0)
         self._run_task(
-            self._backend.reload_registry,
+            self._backend.register_and_reload,
             self._handle_reload_result,
-            "Перерегистрация",
+            "Регистрация",
         )
 
     def _run_task(
@@ -456,20 +618,30 @@ class SettingsTab(QWidget):
 
     def _handle_reload_result(self, result_obj: object) -> None:
         """
-        Показывает результат перезагрузки каталога.
+        Показывает результат полной регистрации.
         """
-        command_count, service_count, failure_count = cast(
-            tuple[int, int, int], result_obj
-        )
+        (
+            processed_files,
+            changed_files,
+            unchanged_files,
+            removed_files,
+            failed_files,
+            installed_dependency_groups,
+            venv_created,
+        ) = cast(tuple[int, int, int, int, int, int, bool], result_obj)
 
         QMessageBox.information(
             self,
-            "Перерегистрация",
+            "Регистрация",
             (
-                f"Каталог обновлён.\n\n"
-                f"Команд: {command_count}\n"
-                f"Сервисов: {service_count}\n"
-                f"Ошибок: {failure_count}"
+                f"Регистрация завершена.\n\n"
+                f"Обработано файлов: {processed_files}\n"
+                f"Изменено: {changed_files}\n"
+                f"Без изменений: {unchanged_files}\n"
+                f"Удалено: {removed_files}\n"
+                f"Ошибок: {failed_files}\n"
+                f"Групп зависимостей установлено: {installed_dependency_groups}\n"
+                f"Новое venv создано: {'Да' if venv_created else 'Нет'}"
             ),
         )
         self._refresh_all()
@@ -518,9 +690,13 @@ class LogsTab(QWidget):
         self._table.setRowCount(len(logs))
 
         for row_index, log_record in enumerate(logs):
-            self._table.setItem(
-                row_index, 0, QTableWidgetItem(log_record.created_at_utc)
+            display_time, tooltip_time = _format_log_timestamp(
+                log_record.created_at_utc
             )
+            time_item = QTableWidgetItem(display_time)
+            time_item.setToolTip(tooltip_time)
+            self._table.setItem(row_index, 0, time_item)
+
             self._table.setItem(row_index, 1, QTableWidgetItem(log_record.title))
             self._table.setItem(
                 row_index,
@@ -536,7 +712,10 @@ class LogsTab(QWidget):
                 3,
                 QTableWidgetItem("Успех" if log_record.success else "Ошибка"),
             )
-            self._table.setItem(row_index, 4, QTableWidgetItem(log_record.message))
+
+            message_item = QTableWidgetItem(log_record.message)
+            message_item.setToolTip(log_record.message)
+            self._table.setItem(row_index, 4, message_item)
 
             replay_button = QPushButton("Повторить", self)
             replay_button.setEnabled(log_record.action_json is not None)
@@ -618,7 +797,7 @@ class MainWindow(QMainWindow):
         self._allow_close = False
 
         self.setWindowTitle("PContext")
-        self.resize(1100, 720)
+        self.resize(1100, 760)
 
         self._tab_widget = QTabWidget(self)
         self.setCentralWidget(self._tab_widget)

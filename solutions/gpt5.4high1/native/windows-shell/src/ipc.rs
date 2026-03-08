@@ -8,13 +8,6 @@ use anyhow::{bail, Context, Result};
 
 use crate::models::{AgentEndpoint, ResponseMessage, PROTOCOL_VERSION};
 
-/// Возвращает путь к discovery-файлу агента.
-///
-/// По умолчанию это:
-/// `~/.pcontext/runtime/agent-endpoint.json`
-///
-/// Для отладки можно переопределить путь через переменную окружения
-/// `PCONTEXT_AGENT_ENDPOINT`.
 pub fn resolve_agent_endpoint_path() -> Result<PathBuf> {
     if let Ok(custom_path) = std::env::var("PCONTEXT_AGENT_ENDPOINT") {
         let path = PathBuf::from(custom_path);
@@ -29,7 +22,6 @@ pub fn resolve_agent_endpoint_path() -> Result<PathBuf> {
         .join("agent-endpoint.json"))
 }
 
-/// Читает и валидирует discovery-файл агента.
 pub fn load_agent_endpoint(path: &Path) -> Result<AgentEndpoint> {
     let text = fs::read_to_string(path)
         .with_context(|| format!("Не удалось прочитать discovery-файл: {}", path.display()))?;
@@ -48,12 +40,18 @@ pub fn load_agent_endpoint(path: &Path) -> Result<AgentEndpoint> {
     Ok(endpoint)
 }
 
-/// Отправляет JSON-запрос агенту и получает один JSON-ответ.
-///
-/// Протокол простой:
-/// - одна JSON-строка на вход;
-/// - одна JSON-строка на выход.
 pub fn send_json_request<TRequest>(endpoint: &AgentEndpoint, request: &TRequest) -> Result<ResponseMessage>
+where
+    TRequest: serde::Serialize,
+{
+    send_json_request_with_timeout(endpoint, request, Duration::from_secs(3))
+}
+
+pub fn send_json_request_with_timeout<TRequest>(
+    endpoint: &AgentEndpoint,
+    request: &TRequest,
+    timeout: Duration,
+) -> Result<ResponseMessage>
 where
     TRequest: serde::Serialize,
 {
@@ -63,11 +61,11 @@ where
         .with_context(|| format!("Не удалось подключиться к агенту по адресу {address}."))?;
 
     stream
-        .set_read_timeout(Some(Duration::from_secs(3)))
+        .set_read_timeout(Some(timeout))
         .context("Не удалось установить timeout чтения для сокета.")?;
 
     stream
-        .set_write_timeout(Some(Duration::from_secs(3)))
+        .set_write_timeout(Some(timeout))
         .context("Не удалось установить timeout записи для сокета.")?;
 
     let payload =
