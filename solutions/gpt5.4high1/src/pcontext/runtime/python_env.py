@@ -5,27 +5,30 @@ import sys
 from pathlib import Path
 
 
-def get_project_src_path() -> Path:
-    """
-    Возвращает путь до директории `src` текущего проекта.
+_SHARED_SITE_PACKAGES_ENV = "PCONTEXT_SHARED_SITE_PACKAGES"
+_PROJECT_SRC_ENV = "PCONTEXT_PROJECT_SRC"
 
-    Он нужен, чтобы subprocess-процессы могли импортировать сам пакет pcontext,
-    даже если запускаются не из основного uv-окружения проекта.
+
+def get_runtime_project_src_path() -> Path:
     """
+    Возвращает путь до директории `src`, доступной текущему процессу.
+
+    В обычной разработке это исходная папка проекта.
+    В frozen-сборке ожидается, что рядом с exe лежит папка `src`.
+    """
+    if getattr(sys, "frozen", False):
+        frozen_src = Path(sys.executable).resolve().parent / "src"
+        if frozen_src.is_dir():
+            return frozen_src
+
     return Path(__file__).resolve().parents[2]
 
 
 def get_shared_venv_dir(base_dir: Path) -> Path:
-    """
-    Возвращает путь до общего виртуального окружения PContext.
-    """
     return base_dir / "venv"
 
 
 def get_shared_venv_python(base_dir: Path) -> Path:
-    """
-    Возвращает путь до интерпретатора Python внутри общего venv.
-    """
     venv_dir = get_shared_venv_dir(base_dir)
 
     if os.name == "nt":
@@ -35,12 +38,6 @@ def get_shared_venv_python(base_dir: Path) -> Path:
 
 
 def get_shared_venv_site_packages(base_dir: Path) -> Path:
-    """
-    Возвращает путь до site-packages внутри общего venv.
-
-    Мы предполагаем, что venv создаётся под той же версией Python,
-    что и основное приложение PContext.
-    """
     venv_dir = get_shared_venv_dir(base_dir)
 
     if os.name == "nt":
@@ -53,16 +50,14 @@ def get_shared_venv_site_packages(base_dir: Path) -> Path:
 def build_subprocess_env(base_dir: Path) -> dict[str, str]:
     """
     Строит окружение для worker/service subprocess-процессов.
-
-    В `PYTHONPATH` добавляются:
-    - `src` текущего проекта, чтобы subprocess видел пакет `pcontext`;
-    - `site-packages` общего venv, чтобы subprocess видел зависимости скриптов.
     """
     env = os.environ.copy()
 
-    python_path_entries: list[str] = [str(get_project_src_path())]
-
+    project_src = get_runtime_project_src_path()
     shared_site_packages = get_shared_venv_site_packages(base_dir)
+
+    python_path_entries: list[str] = [str(project_src)]
+
     if shared_site_packages.is_dir():
         python_path_entries.append(str(shared_site_packages))
 
@@ -71,4 +66,29 @@ def build_subprocess_env(base_dir: Path) -> dict[str, str]:
         python_path_entries.append(existing_pythonpath)
 
     env["PYTHONPATH"] = os.pathsep.join(python_path_entries)
+    env[_PROJECT_SRC_ENV] = str(project_src)
+    env[_SHARED_SITE_PACKAGES_ENV] = str(shared_site_packages)
+
     return env
+
+
+def apply_internal_subprocess_paths_from_env() -> None:
+    """
+    Принудительно добавляет project src и shared site-packages в sys.path.
+    """
+    candidate_paths = [
+        os.environ.get(_PROJECT_SRC_ENV),
+        os.environ.get(_SHARED_SITE_PACKAGES_ENV),
+    ]
+
+    for raw_path in candidate_paths:
+        if not raw_path:
+            continue
+
+        path = Path(raw_path)
+        if not path.exists():
+            continue
+
+        path_str = str(path)
+        if path_str not in sys.path:
+            sys.path.insert(0, path_str)

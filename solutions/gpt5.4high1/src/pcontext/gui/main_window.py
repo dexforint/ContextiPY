@@ -10,6 +10,7 @@ from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -28,6 +29,7 @@ from PySide6.QtWidgets import (
 from pcontext.agent.service_manager import ServiceControlResult
 from pcontext.config import PContextPaths
 from pcontext.gui.backend import GuiBackend, ScriptListItem
+from pcontext.gui.style import configure_table, set_button_role
 from pcontext.gui.tasks import BackgroundTask
 from pcontext.storage.models import RegistrationModuleRecord
 
@@ -55,6 +57,25 @@ def _shorten_text(value: str | None, max_length: int = 140) -> str:
     return value[: max_length - 3] + "..."
 
 
+class SectionCard(QFrame):
+    """
+    Простая карточка-секция для современного layout.
+    """
+
+    def __init__(self, title: str | None = None, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setProperty("card", "true")
+
+        self.layout_root = QVBoxLayout(self)
+        self.layout_root.setContentsMargins(18, 18, 18, 18)
+        self.layout_root.setSpacing(12)
+
+        if title:
+            title_label = QLabel(title, self)
+            title_label.setProperty("role", "sectionTitle")
+            self.layout_root.addWidget(title_label)
+
+
 class ServicesTab(QWidget):
     def __init__(
         self,
@@ -74,17 +95,22 @@ class ServicesTab(QWidget):
         self._table.setHorizontalHeaderLabels(
             ["Название", "ID", "Статус", "Автостарт", "Методов", "Действие"]
         )
+        configure_table(self._table)
         self._table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch
         )
         self._table.verticalHeader().setVisible(False)
 
         refresh_button = QPushButton("Обновить", self)
+        set_button_role(refresh_button, "primary")
         refresh_button.clicked.connect(self.refresh_data)
 
+        card = SectionCard("Сервисы", self)
+        card.layout_root.addWidget(refresh_button)
+        card.layout_root.addWidget(self._table)
+
         layout = QVBoxLayout(self)
-        layout.addWidget(refresh_button)
-        layout.addWidget(self._table)
+        layout.addWidget(card)
 
     def refresh_data(self) -> None:
         services = self._backend.list_services()
@@ -110,6 +136,8 @@ class ServicesTab(QWidget):
             action_button = QPushButton(
                 "Остановить" if service.running else "Запустить", self
             )
+            if not service.running:
+                set_button_role(action_button, "primary")
             action_button.clicked.connect(
                 partial(self._toggle_service, service.service_id, service.running)
             )
@@ -191,17 +219,22 @@ class ScriptsTab(QWidget):
         self._table.setHorizontalHeaderLabels(
             ["Название", "Тип", "Описание", "Сервис", "Параметры", "Запуск"]
         )
+        configure_table(self._table)
         self._table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch
         )
         self._table.verticalHeader().setVisible(False)
 
         refresh_button = QPushButton("Обновить", self)
+        set_button_role(refresh_button, "primary")
         refresh_button.clicked.connect(self.refresh_data)
 
+        card = SectionCard("Скрипты", self)
+        card.layout_root.addWidget(refresh_button)
+        card.layout_root.addWidget(self._table)
+
         layout = QVBoxLayout(self)
-        layout.addWidget(refresh_button)
-        layout.addWidget(self._table)
+        layout.addWidget(card)
 
     def refresh_data(self) -> None:
         items = self._backend.list_script_items()
@@ -226,6 +259,7 @@ class ScriptsTab(QWidget):
         self._table.setCellWidget(row_index, 4, params_button)
 
         run_button = QPushButton("Запустить", self)
+        set_button_role(run_button, "primary")
         run_button.setEnabled(item.direct_run_enabled)
         run_button.clicked.connect(partial(self._invoke_direct, item.owner_id))
         self._table.setCellWidget(row_index, 5, run_button)
@@ -350,6 +384,7 @@ class SettingsTab(QWidget):
                 "Детали",
             ]
         )
+        configure_table(self._registration_table)
         self._registration_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch
         )
@@ -359,6 +394,7 @@ class SettingsTab(QWidget):
         save_button.clicked.connect(self._save_settings)
 
         reload_button = QPushButton("Регистрация и обновление", self)
+        set_button_role(reload_button, "primary")
         reload_button.clicked.connect(self._reload_registry)
 
         open_scripts_button = QPushButton("Открыть папку со скриптами", self)
@@ -373,33 +409,43 @@ class SettingsTab(QWidget):
         refresh_diagnostics_button = QPushButton("Обновить диагностику", self)
         refresh_diagnostics_button.clicked.connect(self.refresh_data)
 
-        buttons_row = QHBoxLayout()
-        buttons_row.addWidget(save_button)
-        buttons_row.addWidget(reload_button)
-        buttons_row.addWidget(open_scripts_button)
-        buttons_row.addWidget(open_runtime_button)
-        buttons_row.addWidget(open_launcher_log_button)
-        buttons_row.addWidget(refresh_diagnostics_button)
-        buttons_row.addStretch(1)
+        general_card = SectionCard("Общие настройки", self)
+        general_card.layout_root.addWidget(self._autostart_checkbox)
+        general_card.layout_root.addWidget(self._disable_notifications_checkbox)
+        general_card.layout_root.addWidget(self._info_label)
+
+        general_buttons = QHBoxLayout()
+        general_buttons.addWidget(save_button)
+        general_buttons.addWidget(reload_button)
+        general_buttons.addWidget(open_scripts_button)
+        general_buttons.addWidget(open_runtime_button)
+        general_buttons.addWidget(open_launcher_log_button)
+        general_buttons.addWidget(refresh_diagnostics_button)
+        general_buttons.addStretch(1)
+        general_card.layout_root.addLayout(general_buttons)
+
+        shell_card = SectionCard("Windows shell диагностика", self)
+        shell_card.layout_root.addWidget(self._windows_shell_label)
+        shell_card.layout_root.addWidget(self._launcher_log_view)
+
+        registration_card = SectionCard("Регистрация скриптов", self)
+        registration_card.layout_root.addWidget(self._registration_summary_label)
+        registration_card.layout_root.addWidget(self._failed_summary_label)
+        registration_card.layout_root.addWidget(self._registration_table)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(self._autostart_checkbox)
-        layout.addWidget(self._disable_notifications_checkbox)
-        layout.addWidget(self._info_label)
-        layout.addLayout(buttons_row)
-        layout.addWidget(self._windows_shell_label)
-        layout.addWidget(self._launcher_log_view)
-        layout.addWidget(self._registration_summary_label)
-        layout.addWidget(self._failed_summary_label)
-        layout.addWidget(self._registration_table)
+        layout.setSpacing(14)
+        layout.addWidget(general_card)
+        layout.addWidget(shell_card)
+        layout.addWidget(registration_card)
         layout.addStretch(1)
 
         self.refresh_data()
 
     def refresh_data(self) -> None:
-        self._autostart_checkbox.setChecked(
-            bool(self._backend.get_setting(GuiBackend.SETTINGS_AUTOSTART, False))
-        )
+        autostart_info = self._backend.get_windows_autostart_info()
+        self._autostart_checkbox.setChecked(autostart_info.enabled)
+
         self._disable_notifications_checkbox.setChecked(
             bool(
                 self._backend.get_setting(
@@ -416,6 +462,8 @@ class SettingsTab(QWidget):
             f"Python в venv: <code>{venv_status.python_executable}</code><br>"
             f"site-packages: <code>{venv_status.site_packages_dir}</code><br>"
             f"venv существует: <b>{'Да' if venv_status.exists else 'Нет'}</b><br>"
+            f"Автозапуск Windows поддерживается: <b>{'Да' if autostart_info.supported else 'Нет'}</b><br>"
+            f"Команда автозапуска: <code>{autostart_info.expected_command or '—'}</code><br>"
             f"SQLite: <code>{self._paths.state_db}</code>"
         )
 
@@ -514,15 +562,23 @@ class SettingsTab(QWidget):
         self._show_status(result_message, 5000)
 
     def _save_settings(self) -> None:
-        self._backend.set_setting(
-            GuiBackend.SETTINGS_AUTOSTART,
-            self._autostart_checkbox.isChecked(),
-        )
+        try:
+            self._backend.set_windows_autostart(self._autostart_checkbox.isChecked())
+        except Exception as error:  # noqa: BLE001
+            QMessageBox.warning(
+                self,
+                "Автозапуск",
+                str(error),
+            )
+            self.refresh_data()
+            return
+
         self._backend.set_setting(
             GuiBackend.SETTINGS_DISABLE_NOTIFICATIONS,
             self._disable_notifications_checkbox.isChecked(),
         )
         self._show_status("Настройки сохранены.", 5000)
+        self.refresh_data()
 
     def _open_scripts_folder(self) -> None:
         try:
@@ -636,17 +692,22 @@ class LogsTab(QWidget):
         self._table.setHorizontalHeaderLabels(
             ["Время", "Имя", "Длительность", "Статус", "Сообщение", "Повтор"]
         )
+        configure_table(self._table)
         self._table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch
         )
         self._table.verticalHeader().setVisible(False)
 
         refresh_button = QPushButton("Обновить", self)
+        set_button_role(refresh_button, "primary")
         refresh_button.clicked.connect(self.refresh_data)
 
+        card = SectionCard("Логи", self)
+        card.layout_root.addWidget(refresh_button)
+        card.layout_root.addWidget(self._table)
+
         layout = QVBoxLayout(self)
-        layout.addWidget(refresh_button)
-        layout.addWidget(self._table)
+        layout.addWidget(card)
 
     def refresh_data(self) -> None:
         logs = self._backend.list_logs(limit=100)
@@ -744,7 +805,7 @@ class MainWindow(QMainWindow):
         self._allow_close = False
 
         self.setWindowTitle("PContext")
-        self.resize(1100, 760)
+        self.resize(1180, 820)
 
         self._tab_widget = QTabWidget(self)
         self.setCentralWidget(self._tab_widget)

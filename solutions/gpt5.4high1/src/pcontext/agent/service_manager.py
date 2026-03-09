@@ -136,9 +136,10 @@ class ServiceManager:
         Запускает новый service-host процесс.
         """
         from pcontext.runtime.python_env import build_subprocess_env
+        from pcontext.runtime.subprocess_entrypoints import build_service_worker_command
 
         process = subprocess.Popen(
-            [sys.executable, "-m", "pcontext.runner.service_worker"],
+            build_service_worker_command(),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

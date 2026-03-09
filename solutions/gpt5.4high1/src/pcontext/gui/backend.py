@@ -10,6 +10,11 @@ from pcontext.gui.windows_shell_diagnostics import (
     WindowsShellDiagnostics,
     collect_windows_shell_diagnostics,
 )
+from pcontext.platform.windows.autostart import (
+    WindowsAutostartInfo,
+    get_windows_autostart_info,
+    set_windows_autostart_enabled,
+)
 from pcontext.registrar.models import ParamArgumentManifest
 from pcontext.registrar.registration import register_scripts
 from pcontext.runtime.action_codec import (
@@ -69,6 +74,19 @@ class GuiBackend:
     @property
     def application(self) -> AgentApplication:
         return self._application
+
+    def get_windows_autostart_info(self) -> WindowsAutostartInfo:
+        """
+        Возвращает реальное состояние автозапуска Windows.
+        """
+        return get_windows_autostart_info()
+
+    def set_windows_autostart(self, enabled: bool) -> None:
+        """
+        Применяет автозапуск Windows и сохраняет пользовательскую настройку.
+        """
+        set_windows_autostart_enabled(enabled)
+        self._application.state_store.set_setting(self.SETTINGS_AUTOSTART, enabled)
 
     def register_and_reload(self) -> tuple[int, int, int, int, int, int, bool]:
         registration_result = register_scripts(

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import sys
 
-import qdarktheme
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
@@ -14,6 +13,7 @@ from pcontext.gui.backend import GuiBackend
 from pcontext.gui.icons import load_application_icon
 from pcontext.gui.main_window import MainWindow
 from pcontext.gui.menu_bridge import GuiMenuBridge
+from pcontext.gui.style import apply_modern_style
 from pcontext.runtime.action_executor import (
     ActionExecutionHooks,
     clear_action_execution_hooks,
@@ -31,7 +31,11 @@ from pcontext.runtime.menu_runtime import (
 )
 
 
-def run_gui(paths: PContextPaths | None = None) -> int:
+def run_gui(
+    paths: PContextPaths | None = None,
+    *,
+    start_hidden: bool = False,
+) -> int:
     """
     Запускает tray-приложение PContext.
     """
@@ -44,7 +48,7 @@ def run_gui(paths: PContextPaths | None = None) -> int:
     application.setApplicationName("PContext")
     application.setQuitOnLastWindowClosed(False)
 
-    qdarktheme.setup_theme("auto")
+    apply_modern_style(application)
 
     app_icon = load_application_icon(resolved_paths, application)
     application.setWindowIcon(app_icon)
@@ -64,6 +68,19 @@ def run_gui(paths: PContextPaths | None = None) -> int:
     ask_bridge = GuiAskBridge(parent=application)
     menu_bridge = GuiMenuBridge(backend=backend, parent=application)
 
+    # Держим сильные ссылки на всё время жизни приложения.
+    application._pcontext_runtime = runtime  # type: ignore[attr-defined]
+    application._pcontext_backend = backend  # type: ignore[attr-defined]
+    application._pcontext_window = window  # type: ignore[attr-defined]
+    application._pcontext_tray_icon = tray_icon  # type: ignore[attr-defined]
+    application._pcontext_action_bridge = action_bridge  # type: ignore[attr-defined]
+    application._pcontext_ask_bridge = ask_bridge  # type: ignore[attr-defined]
+    application._pcontext_menu_bridge = menu_bridge  # type: ignore[attr-defined]
+
+    window._pcontext_action_bridge = action_bridge  # type: ignore[attr-defined]
+    window._pcontext_ask_bridge = ask_bridge  # type: ignore[attr-defined]
+    window._pcontext_menu_bridge = menu_bridge  # type: ignore[attr-defined]
+
     install_action_execution_hooks(
         ActionExecutionHooks(
             show_text=action_bridge.show_text,
@@ -82,7 +99,9 @@ def run_gui(paths: PContextPaths | None = None) -> int:
     )
 
     tray_icon.show()
-    window.show()
+
+    if not start_hidden:
+        window.show()
 
     try:
         return application.exec()

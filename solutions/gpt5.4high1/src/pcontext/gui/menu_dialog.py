@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 import ctypes
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QTimer, Qt
-from PySide6.QtGui import QIcon, QKeySequence, QShortcut
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QCloseEvent, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QDialog,
-    QDialogButtonBox,
+    QFrame,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -21,19 +21,15 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
-    QWidget,
 )
 
 from pcontext.config import get_paths
+from pcontext.gui.style import configure_table, set_button_role
 from pcontext.runtime.menu_runtime import ChooserItem
 
 
 @dataclass(frozen=True, slots=True)
 class _RenderedRow:
-    """
-    Одна строка таблицы chooser после фильтрации и сортировки.
-    """
-
     item: ChooserItem
     updated_display: str
     updated_sort_value: float
@@ -43,9 +39,6 @@ class _RenderedRow:
 
 
 def _utc_to_local_display(raw_value: str | None) -> tuple[str, float]:
-    """
-    Преобразует UTC ISO-время в строку локального времени и числовой ключ сортировки.
-    """
     if not raw_value:
         return "—", 0.0
 
@@ -58,16 +51,12 @@ def _utc_to_local_display(raw_value: str | None) -> tuple[str, float]:
 
 
 class MenuChooserDialog(QDialog):
-    """
-    Диалог выбора команды PContext с поиском и сортировкой.
-    """
-
     SORT_RECENT = "recent"
     SORT_NAME = "name"
     SORT_UPDATED = "updated"
     SORT_POPULARITY = "popularity"
 
-    DEFAULT_COLUMN_WIDTHS = [240, 280, 170, 170, 150, 90, 170, 170]
+    DEFAULT_COLUMN_WIDTHS = [240, 280, 170, 150, 170, 150, 90, 170]
 
     def __init__(
         self,
@@ -77,14 +66,17 @@ class MenuChooserDialog(QDialog):
         initial_sort_mode: str | None = None,
         initial_geometry: dict[str, int] | None = None,
         initial_column_widths: list[int] | None = None,
-        parent: QWidget | None = None,
+        parent=None,
     ) -> None:
         super().__init__(parent)
         self._current_folder = current_folder
         self._items = items
 
+        self._shown_at_monotonic: float | None = None
+        self._startup_close_guard_seconds = 0.6
+
         self.setWindowTitle("PContext")
-        self.resize(1120, 620)
+        self.resize(1180, 680)
         self.setModal(True)
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
@@ -96,35 +88,49 @@ class MenuChooserDialog(QDialog):
         self._refresh_table()
 
         QShortcut(QKeySequence("Ctrl+F"), self, activated=self._focus_search)
-        QTimer.singleShot(0, self._bring_to_front)
 
     def _build_ui(self) -> None:
-        """
-        Собирает интерфейс chooser-диалога.
-        """
-        layout = QVBoxLayout(self)
+        root_layout = QVBoxLayout(self)
+        root_layout.setSpacing(14)
 
-        header_text = "Выберите команду PContext"
-        if self._current_folder:
-            short_folder = self._current_folder
-            if len(short_folder) > 120:
-                short_folder = short_folder[:117] + "..."
-            header_text += f"\n\nКонтекст:\n{short_folder}"
+        header_card = QFrame(self)
+        header_card.setProperty("card", "true")
+        header_layout = QVBoxLayout(header_card)
+        header_layout.setContentsMargins(18, 18, 18, 18)
+        header_layout.setSpacing(10)
 
-        self._header_label = QLabel(header_text, self)
-        self._header_label.setWordWrap(True)
-        if self._current_folder:
-            self._header_label.setToolTip(self._current_folder)
-        layout.addWidget(self._header_label)
+        title_label = QLabel("Выберите команду PContext", header_card)
+        title_label.setProperty("role", "sectionTitle")
+        header_layout.addWidget(title_label)
 
-        controls_layout = QHBoxLayout()
+        context_text = self._current_folder or "Контекст не передан"
+        short_context = (
+            context_text if len(context_text) <= 140 else context_text[:137] + "..."
+        )
+        self._context_label = QLabel(f"Контекст: {short_context}", header_card)
+        self._context_label.setProperty("role", "muted")
+        self._context_label.setToolTip(context_text)
+        self._context_label.setWordWrap(True)
+        header_layout.addWidget(self._context_label)
+
+        root_layout.addWidget(header_card)
+
+        controls_card = QFrame(self)
+        controls_card.setProperty("card", "true")
+        controls_layout_outer = QVBoxLayout(controls_card)
+        controls_layout_outer.setContentsMargins(18, 18, 18, 18)
+        controls_layout_outer.setSpacing(12)
+
+        controls_row = QHBoxLayout()
+        controls_row.setSpacing(10)
 
         self._search_edit = QLineEdit(self)
         self._search_edit.setPlaceholderText(
             "Поиск по названию, описанию, сервису или тегам"
         )
+        self._search_edit.setClearButtonEnabled(True)
         self._search_edit.textChanged.connect(self._refresh_table)
-        controls_layout.addWidget(self._search_edit)
+        controls_row.addWidget(self._search_edit, 1)
 
         self._sort_combo = QComboBox(self)
         self._sort_combo.addItem("По последнему применению", self.SORT_RECENT)
@@ -132,13 +138,22 @@ class MenuChooserDialog(QDialog):
         self._sort_combo.addItem("По дате обновления", self.SORT_UPDATED)
         self._sort_combo.addItem("По популярности", self.SORT_POPULARITY)
         self._sort_combo.currentIndexChanged.connect(self._refresh_table)
-        controls_layout.addWidget(self._sort_combo)
+        controls_row.addWidget(self._sort_combo)
 
-        layout.addLayout(controls_layout)
+        controls_layout_outer.addLayout(controls_row)
 
         self._summary_label = QLabel(self)
+        self._summary_label.setProperty("role", "muted")
         self._summary_label.setWordWrap(True)
-        layout.addWidget(self._summary_label)
+        controls_layout_outer.addWidget(self._summary_label)
+
+        root_layout.addWidget(controls_card)
+
+        table_card = QFrame(self)
+        table_card.setProperty("card", "true")
+        table_layout = QVBoxLayout(table_card)
+        table_layout.setContentsMargins(18, 18, 18, 18)
+        table_layout.setSpacing(12)
 
         self._table = QTableWidget(self)
         self._table.setColumnCount(8)
@@ -154,33 +169,32 @@ class MenuChooserDialog(QDialog):
                 "Последнее применение",
             ]
         )
-
-        header = self._table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-
-        self._table.verticalHeader().setVisible(False)
+        configure_table(self._table)
+        self._table.horizontalHeader().setStretchLastSection(True)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._table.setAlternatingRowColors(True)
         self._table.itemDoubleClicked.connect(
             lambda _item: self._accept_with_validation()
         )
-        layout.addWidget(self._table)
+        table_layout.addWidget(self._table)
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
-            Qt.Orientation.Horizontal,
-            self,
-        )
-        buttons.accepted.connect(self._accept_with_validation)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        buttons_row = QHBoxLayout()
+        buttons_row.addStretch(1)
+
+        self._cancel_button = QPushButton("Отмена", self)
+        self._cancel_button.clicked.connect(self.reject)
+        buttons_row.addWidget(self._cancel_button)
+
+        self._run_button = QPushButton("Запустить", self)
+        set_button_role(self._run_button, "primary")
+        self._run_button.clicked.connect(self._accept_with_validation)
+        buttons_row.addWidget(self._run_button)
+
+        table_layout.addLayout(buttons_row)
+        root_layout.addWidget(table_card)
 
     def _apply_initial_sort_mode(self, sort_mode: str | None) -> None:
-        """
-        Применяет сохранённую сортировку chooser.
-        """
         if not sort_mode:
             return
 
@@ -189,9 +203,6 @@ class MenuChooserDialog(QDialog):
             self._sort_combo.setCurrentIndex(index)
 
     def _apply_initial_geometry(self, geometry: dict[str, int] | None) -> None:
-        """
-        Применяет сохранённые размеры и позицию окна.
-        """
         if not geometry:
             return
 
@@ -209,9 +220,6 @@ class MenuChooserDialog(QDialog):
         self.setGeometry(x, y, width, height)
 
     def _apply_initial_column_widths(self, widths: list[int] | None) -> None:
-        """
-        Применяет сохранённые размеры колонок.
-        """
         effective_widths = (
             widths
             if widths and len(widths) == self._table.columnCount()
@@ -223,9 +231,6 @@ class MenuChooserDialog(QDialog):
                 self._table.setColumnWidth(index, width)
 
     def export_geometry_state(self) -> dict[str, int]:
-        """
-        Возвращает текущее положение и размер chooser.
-        """
         geometry = self.geometry()
         return {
             "x": geometry.x(),
@@ -235,30 +240,23 @@ class MenuChooserDialog(QDialog):
         }
 
     def export_column_widths(self) -> list[int]:
-        """
-        Возвращает текущую ширину всех колонок таблицы.
-        """
         return [
             self._table.columnWidth(index) for index in range(self._table.columnCount())
         ]
 
     def current_sort_mode(self) -> str:
-        """
-        Возвращает текущий режим сортировки chooser.
-        """
         value = self._sort_combo.currentData()
         return value if isinstance(value, str) else self.SORT_RECENT
 
-    def _focus_search(self) -> None:
+    def mark_shown(self) -> None:
         """
-        Переводит фокус в поле поиска.
+        Помечает момент фактического показа окна.
         """
-        self._search_edit.setFocus()
-        self._search_edit.selectAll()
+        self._shown_at_monotonic = time.monotonic()
 
-    def _bring_to_front(self) -> None:
+    def bring_to_front(self) -> None:
         """
-        Пытается принудительно поднять chooser поверх других окон.
+        Пытается поднять chooser поверх других окон.
         """
         self.show()
         self.raise_()
@@ -273,10 +271,29 @@ class MenuChooserDialog(QDialog):
         except Exception:
             pass
 
+    def _focus_search(self) -> None:
+        self._search_edit.setFocus()
+        self._search_edit.selectAll()
+
+    def _startup_close_guard_active(self) -> bool:
+        if self._shown_at_monotonic is None:
+            return True
+        return (
+            time.monotonic() - self._shown_at_monotonic
+        ) < self._startup_close_guard_seconds
+
+    def reject(self) -> None:
+        if self._startup_close_guard_active():
+            return
+        super().reject()
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        if self._startup_close_guard_active():
+            event.ignore()
+            return
+        super().closeEvent(event)
+
     def _refresh_table(self) -> None:
-        """
-        Перестраивает таблицу после фильтрации и сортировки.
-        """
         rows = self._build_rows()
         self._table.setRowCount(len(rows))
 
@@ -292,9 +309,6 @@ class MenuChooserDialog(QDialog):
             self._table.selectRow(0)
 
     def _build_rows(self) -> list[_RenderedRow]:
-        """
-        Готовит список строк chooser с фильтрацией и сортировкой.
-        """
         search_value = self._search_edit.text().strip().lower()
         sort_mode = self._sort_combo.currentData()
 
@@ -367,9 +381,6 @@ class MenuChooserDialog(QDialog):
         return rows
 
     def _build_tags_display(self, item: ChooserItem) -> str:
-        """
-        Собирает короткие теги команды.
-        """
         tags: list[str] = []
 
         if item.has_parameters:
@@ -386,9 +397,6 @@ class MenuChooserDialog(QDialog):
         return " • ".join(tags) if tags else "—"
 
     def _resolve_row_icon(self, item: ChooserItem) -> QIcon:
-        """
-        Возвращает иконку строки chooser.
-        """
         if item.icon_name:
             icon_path = Path(item.icon_name)
             if not icon_path.is_absolute():
@@ -406,9 +414,6 @@ class MenuChooserDialog(QDialog):
         return app_style.standardIcon(QStyle.StandardPixmap.SP_FileIcon)
 
     def _fill_table_row(self, row_index: int, row: _RenderedRow) -> None:
-        """
-        Заполняет одну строку таблицы chooser.
-        """
         item = row.item
         kind_text = "Oneshot" if item.kind == "oneshot_script" else "Service method"
         service_text = item.service_title or "—"
@@ -434,9 +439,6 @@ class MenuChooserDialog(QDialog):
         self._table.setItem(row_index, 7, QTableWidgetItem(row.last_used_display))
 
     def _accept_with_validation(self) -> None:
-        """
-        Пытается завершить выбор с подтверждением.
-        """
         selected_id = self.get_selected_menu_item_id()
         if selected_id is None:
             QMessageBox.warning(
@@ -449,9 +451,6 @@ class MenuChooserDialog(QDialog):
         self.accept()
 
     def get_selected_menu_item_id(self) -> str | None:
-        """
-        Возвращает id выбранного пункта.
-        """
         current_row = self._table.currentRow()
         if current_row < 0:
             return None

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
 
 from pcontext.registrar.introspection import discover_python_files
 from pcontext.registrar.models import ModuleInspectionResult
 from pcontext.runtime.python_env import build_subprocess_env
+from pcontext.runtime.subprocess_entrypoints import build_registrar_worker_command
 
 
 def inspect_script_file_in_subprocess(
@@ -18,9 +18,7 @@ def inspect_script_file_in_subprocess(
     Анализирует один скрипт в отдельном Python-процессе.
     """
     command = [
-        sys.executable,
-        "-m",
-        "pcontext.registrar.worker",
+        *build_registrar_worker_command(),
         "--scripts-root",
         str(scripts_root),
         str(file_path),

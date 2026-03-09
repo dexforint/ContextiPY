@@ -152,7 +152,12 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("paths", help="Показать стандартные директории PContext.")
     subparsers.add_parser("init-dirs", help="Создать стандартные директории PContext.")
     subparsers.add_parser("agent", help="Запустить IPC-агент в foreground-режиме.")
-    subparsers.add_parser("gui", help="Запустить tray и GUI приложения.")
+    gui_parser = subparsers.add_parser("gui", help="Запустить tray и GUI приложения.")
+    gui_parser.add_argument(
+        "--hidden",
+        action="store_true",
+        help="Запустить GUI скрытым, только с tray icon.",
+    )
     subparsers.add_parser("agent-ping", help="Проверить, что агент отвечает.")
     subparsers.add_parser(
         "register",
@@ -302,7 +307,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if namespace.command == "gui":
             paths = get_paths()
             ensure_directories(paths)
-            return run_gui(paths)
+            return run_gui(paths, start_hidden=bool(namespace.hidden))
 
         if namespace.command == "agent-ping":
             paths = get_paths()

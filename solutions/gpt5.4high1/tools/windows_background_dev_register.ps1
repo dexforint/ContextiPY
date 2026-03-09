@@ -3,6 +3,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ExePath,
 
+    [string]$GuiExecutablePath = "",
+
     [switch]$RestartExplorer
 )
 
@@ -81,6 +83,19 @@ function Register-PContextSingleEntry {
 }
 
 function Resolve-GuiExecutable {
+    param(
+        [Parameter(Mandatory = $false)]
+        [string]$RequestedPath
+    )
+
+    if ($RequestedPath) {
+        $resolved = (Resolve-Path -LiteralPath $RequestedPath).Path
+        if (-not (Test-Path -LiteralPath $resolved)) {
+            throw "GUI executable не найден: $RequestedPath"
+        }
+        return $resolved
+    }
+
     $venvPath = $env:VIRTUAL_ENV
 
     if ($venvPath) {
@@ -114,8 +129,16 @@ if (-not (Test-Path -LiteralPath $exeFullPath)) {
 }
 
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
-$guiExecutable = Resolve-GuiExecutable
-$guiArgs = @("-m", "pcontext.cli", "gui")
+$guiExecutable = Resolve-GuiExecutable -RequestedPath $GuiExecutablePath
+
+if ($GuiExecutablePath) {
+    $guiArgs = @("--hidden")
+    $workingDirectory = Split-Path -Path $guiExecutable -Parent
+}
+else {
+    $guiArgs = @("-m", "pcontext.cli", "gui")
+    $workingDirectory = $projectRoot
+}
 
 $customIconPath = Join-Path $HOME ".pcontext\icons\pcontext.ico"
 if (Test-Path -LiteralPath $customIconPath) {
@@ -169,7 +192,7 @@ $configPath = Join-Path $runtimeDir "windows-shell-dev-config.json"
 $config = [ordered]@{
     gui_executable = $guiExecutable
     gui_args = $guiArgs
-    working_directory = $projectRoot
+    working_directory = $workingDirectory
     auto_start_gui_if_missing = $true
     launcher_exe = $exeFullPath
     icon_path = $iconPath
@@ -185,7 +208,7 @@ $journal = [ordered]@{
     icon_path = $iconPath
     gui_executable = $guiExecutable
     gui_args = $guiArgs
-    working_directory = $projectRoot
+    working_directory = $workingDirectory
     scopes = @(
         "Directory\Background",
         "*",
@@ -204,6 +227,8 @@ Write-Host "Безопасная dev-регистрация завершена."
 Write-Host "EXE: $exeFullPath"
 Write-Host "Icon: $iconPath"
 Write-Host "GUI executable: $guiExecutable"
+Write-Host "GUI args: $($guiArgs -join ' ')"
+Write-Host "Working directory: $workingDirectory"
 Write-Host "Scopes: Directory\Background, *, Directory"
 Write-Host "Mode: single entry opens GUI chooser"
 Write-Host "Config: $configPath"

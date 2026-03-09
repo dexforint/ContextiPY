@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
 
 from pcontext.runner.models import (
@@ -11,6 +10,7 @@ from pcontext.runner.models import (
     OneshotExecutionRequest,
 )
 from pcontext.runtime.python_env import build_subprocess_env
+from pcontext.runtime.subprocess_entrypoints import build_runner_worker_command
 
 
 def execute_oneshot_in_subprocess(
@@ -19,12 +19,7 @@ def execute_oneshot_in_subprocess(
     """
     Выполняет oneshot-скрипт в отдельном Python-процессе.
     """
-    command = [
-        sys.executable,
-        "-m",
-        "pcontext.runner.worker",
-    ]
-
+    command = build_runner_worker_command()
     scripts_root = Path(request.scripts_root).expanduser().resolve()
 
     completed = subprocess.run(
