@@ -33,9 +33,6 @@ from pcontext.storage.models import RegistrationModuleRecord
 
 
 def _format_log_timestamp(raw_value: str) -> tuple[str, str]:
-    """
-    Преобразует ISO-время из UTC в короткий локальный формат для GUI.
-    """
     try:
         dt_utc = datetime.fromisoformat(raw_value)
         dt_local = dt_utc.astimezone()
@@ -50,11 +47,15 @@ def _format_log_timestamp(raw_value: str) -> tuple[str, str]:
         return raw_value, raw_value
 
 
-class ServicesTab(QWidget):
-    """
-    Вкладка управления сервисами.
-    """
+def _shorten_text(value: str | None, max_length: int = 140) -> str:
+    if not value:
+        return "—"
+    if len(value) <= max_length:
+        return value
+    return value[: max_length - 3] + "..."
 
+
+class ServicesTab(QWidget):
     def __init__(
         self,
         backend: GuiBackend,
@@ -86,9 +87,6 @@ class ServicesTab(QWidget):
         layout.addWidget(self._table)
 
     def refresh_data(self) -> None:
-        """
-        Перерисовывает таблицу сервисов.
-        """
         services = self._backend.list_services()
         self._table.setRowCount(len(services))
 
@@ -118,9 +116,6 @@ class ServicesTab(QWidget):
             self._table.setCellWidget(row_index, 5, action_button)
 
     def _toggle_service(self, service_id: str, currently_running: bool) -> None:
-        """
-        Запускает или останавливает сервис в фоне.
-        """
         self._show_status("Выполняется операция с сервисом...", 0)
 
         if currently_running:
@@ -142,9 +137,6 @@ class ServicesTab(QWidget):
         success_handler: Callable[[object], None],
         error_title: str,
     ) -> None:
-        """
-        Запускает фоновую задачу.
-        """
         task = BackgroundTask(function, self)
         task.success_handler = success_handler
         task.error_title = error_title
@@ -154,9 +146,6 @@ class ServicesTab(QWidget):
 
     @Slot(object, object)
     def _on_task_finished(self, result_obj: object, error_obj: object) -> None:
-        """
-        Получает результат фоновой задачи.
-        """
         sender = self.sender()
         if isinstance(sender, BackgroundTask):
             try:
@@ -173,9 +162,6 @@ class ServicesTab(QWidget):
                 sender.success_handler(result_obj)
 
     def _handle_service_result(self, result_obj: object) -> None:
-        """
-        Обрабатывает результат запуска или остановки сервиса.
-        """
         result = cast(ServiceControlResult, result_obj)
 
         if result.accepted:
@@ -187,10 +173,6 @@ class ServicesTab(QWidget):
 
 
 class ScriptsTab(QWidget):
-    """
-    Вкладка со скриптами и service.script-методами.
-    """
-
     def __init__(
         self,
         backend: GuiBackend,
@@ -222,9 +204,6 @@ class ScriptsTab(QWidget):
         layout.addWidget(self._table)
 
     def refresh_data(self) -> None:
-        """
-        Перерисовывает список скриптов.
-        """
         items = self._backend.list_script_items()
         self._table.setRowCount(len(items))
 
@@ -232,9 +211,6 @@ class ScriptsTab(QWidget):
             self._fill_row(row_index, item)
 
     def _fill_row(self, row_index: int, item: ScriptListItem) -> None:
-        """
-        Заполняет одну строку таблицы скриптов.
-        """
         type_label = "Oneshot" if item.kind == "oneshot_script" else "Service method"
         service_label = item.service_title or "—"
         description = item.description or "—"
@@ -255,9 +231,6 @@ class ScriptsTab(QWidget):
         self._table.setCellWidget(row_index, 5, run_button)
 
     def _open_params_dialog(self, owner_id: str) -> None:
-        """
-        Открывает окно редактирования параметров.
-        """
         from pcontext.gui.param_dialog import ParameterDialog
 
         details = self._backend.get_parameter_owner(owner_id)
@@ -276,9 +249,6 @@ class ScriptsTab(QWidget):
             self._refresh_all()
 
     def _invoke_direct(self, owner_id: str) -> None:
-        """
-        Пытается запустить сценарий без входных файлов в фоне.
-        """
         self._show_status("Сценарий выполняется...", 0)
         self._run_task(
             lambda: self._backend.invoke_direct(owner_id),
@@ -292,9 +262,6 @@ class ScriptsTab(QWidget):
         success_handler: Callable[[object], None],
         error_title: str,
     ) -> None:
-        """
-        Запускает фоновую задачу.
-        """
         task = BackgroundTask(function, self)
         task.success_handler = success_handler
         task.error_title = error_title
@@ -304,9 +271,6 @@ class ScriptsTab(QWidget):
 
     @Slot(object, object)
     def _on_task_finished(self, result_obj: object, error_obj: object) -> None:
-        """
-        Получает результат фоновой задачи.
-        """
         sender = self.sender()
         if isinstance(sender, BackgroundTask):
             try:
@@ -323,9 +287,6 @@ class ScriptsTab(QWidget):
                 sender.success_handler(result_obj)
 
     def _handle_direct_invocation_result(self, result_obj: object) -> None:
-        """
-        Обрабатывает результат прямого запуска сценария.
-        """
         accepted, message = cast(tuple[bool, str], result_obj)
 
         if accepted:
@@ -337,10 +298,6 @@ class ScriptsTab(QWidget):
 
 
 class SettingsTab(QWidget):
-    """
-    Вкладка настроек приложения.
-    """
-
     def __init__(
         self,
         backend: GuiBackend,
@@ -377,10 +334,21 @@ class SettingsTab(QWidget):
         self._registration_summary_label = QLabel(self)
         self._registration_summary_label.setWordWrap(True)
 
+        self._failed_summary_label = QLabel(self)
+        self._failed_summary_label.setWordWrap(True)
+
         self._registration_table = QTableWidget(self)
-        self._registration_table.setColumnCount(5)
+        self._registration_table.setColumnCount(7)
         self._registration_table.setHorizontalHeaderLabels(
-            ["Файл", "Статус", "Зависимости", "Ошибка", "Обновлено"]
+            [
+                "Файл",
+                "Статус",
+                "Зависимости",
+                "Ошибка",
+                "Обновлено",
+                "Открыть",
+                "Детали",
+            ]
         )
         self._registration_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch
@@ -422,15 +390,13 @@ class SettingsTab(QWidget):
         layout.addWidget(self._windows_shell_label)
         layout.addWidget(self._launcher_log_view)
         layout.addWidget(self._registration_summary_label)
+        layout.addWidget(self._failed_summary_label)
         layout.addWidget(self._registration_table)
         layout.addStretch(1)
 
         self.refresh_data()
 
     def refresh_data(self) -> None:
-        """
-        Загружает сохранённые настройки и диагностическую информацию.
-        """
         self._autostart_checkbox.setChecked(
             bool(self._backend.get_setting(GuiBackend.SETTINGS_AUTOSTART, False))
         )
@@ -477,12 +443,14 @@ class SettingsTab(QWidget):
         )
 
         modules = self._backend.list_registration_modules()
+        failed_modules = self._backend.list_failed_registration_modules()
         registered_count = sum(1 for item in modules if item.status == "registered")
         error_count = sum(1 for item in modules if item.status == "error")
 
         self._registration_summary_label.setText(
             f"Снимки регистрации: {len(modules)} | Успешно: {registered_count} | Ошибки: {error_count}"
         )
+        self._failed_summary_label.setText(f"Проблемных файлов: {len(failed_modules)}")
 
         self._registration_table.setRowCount(len(modules))
         for row_index, item in enumerate(modules):
@@ -491,9 +459,6 @@ class SettingsTab(QWidget):
     def _fill_registration_row(
         self, row_index: int, item: RegistrationModuleRecord
     ) -> None:
-        """
-        Заполняет одну строку таблицы регистрации.
-        """
         file_item = QTableWidgetItem(item.relative_path)
         file_item.setToolTip(item.source_file)
         self._registration_table.setItem(row_index, 0, file_item)
@@ -509,9 +474,9 @@ class SettingsTab(QWidget):
         )
         self._registration_table.setItem(row_index, 2, dependencies_item)
 
-        error_text = item.error_message or "—"
+        error_text = _shorten_text(item.error_message)
         error_item = QTableWidgetItem(error_text)
-        error_item.setToolTip(error_text)
+        error_item.setToolTip(item.error_message or "—")
         self._registration_table.setItem(row_index, 3, error_item)
 
         display_time, tooltip_time = _format_log_timestamp(item.updated_at_utc)
@@ -519,10 +484,36 @@ class SettingsTab(QWidget):
         time_item.setToolTip(tooltip_time)
         self._registration_table.setItem(row_index, 4, time_item)
 
+        open_button = QPushButton("Открыть", self)
+        open_button.clicked.connect(
+            partial(self._open_registration_source, item.source_file)
+        )
+        self._registration_table.setCellWidget(row_index, 5, open_button)
+
+        details_button = QPushButton("Ошибка", self)
+        details_button.setEnabled(bool(item.error_message))
+        details_button.clicked.connect(partial(self._show_registration_error, item))
+        self._registration_table.setCellWidget(row_index, 6, details_button)
+
+    def _show_registration_error(self, item: RegistrationModuleRecord) -> None:
+        message_box = QMessageBox(self)
+        message_box.setWindowTitle("Ошибка регистрации")
+        message_box.setIcon(QMessageBox.Icon.Warning)
+        message_box.setText(f"Файл: {item.relative_path}")
+        message_box.setInformativeText(_shorten_text(item.error_message, 300))
+        message_box.setDetailedText(item.error_message or "Нет текста ошибки.")
+        message_box.exec()
+
+    def _open_registration_source(self, source_file: str) -> None:
+        try:
+            result_message = self._backend.open_registration_module_source(source_file)
+        except Exception as error:  # noqa: BLE001
+            QMessageBox.warning(self, "Файл скрипта", str(error))
+            return
+
+        self._show_status(result_message, 5000)
+
     def _save_settings(self) -> None:
-        """
-        Сохраняет настройки приложения.
-        """
         self._backend.set_setting(
             GuiBackend.SETTINGS_AUTOSTART,
             self._autostart_checkbox.isChecked(),
@@ -534,9 +525,6 @@ class SettingsTab(QWidget):
         self._show_status("Настройки сохранены.", 5000)
 
     def _open_scripts_folder(self) -> None:
-        """
-        Открывает папку пользовательских скриптов.
-        """
         try:
             result_message = self._backend.open_scripts_folder()
         except Exception as error:  # noqa: BLE001
@@ -546,9 +534,6 @@ class SettingsTab(QWidget):
         self._show_status(result_message, 5000)
 
     def _open_runtime_folder(self) -> None:
-        """
-        Открывает runtime-папку.
-        """
         try:
             result_message = self._backend.open_runtime_folder()
         except Exception as error:  # noqa: BLE001
@@ -558,9 +543,6 @@ class SettingsTab(QWidget):
         self._show_status(result_message, 5000)
 
     def _open_launcher_log(self) -> None:
-        """
-        Открывает launcher.log.
-        """
         try:
             result_message = self._backend.open_launcher_log()
         except Exception as error:  # noqa: BLE001
@@ -570,9 +552,6 @@ class SettingsTab(QWidget):
         self._show_status(result_message, 5000)
 
     def _reload_registry(self) -> None:
-        """
-        Выполняет полную регистрацию скриптов и затем обновляет каталог GUI.
-        """
         self._show_status("Идёт регистрация скриптов и зависимостей...", 0)
         self._run_task(
             self._backend.register_and_reload,
@@ -586,9 +565,6 @@ class SettingsTab(QWidget):
         success_handler: Callable[[object], None],
         error_title: str,
     ) -> None:
-        """
-        Запускает фоновую задачу.
-        """
         task = BackgroundTask(function, self)
         task.success_handler = success_handler
         task.error_title = error_title
@@ -598,9 +574,6 @@ class SettingsTab(QWidget):
 
     @Slot(object, object)
     def _on_task_finished(self, result_obj: object, error_obj: object) -> None:
-        """
-        Получает результат фоновой задачи.
-        """
         sender = self.sender()
         if isinstance(sender, BackgroundTask):
             try:
@@ -617,9 +590,6 @@ class SettingsTab(QWidget):
                 sender.success_handler(result_obj)
 
     def _handle_reload_result(self, result_obj: object) -> None:
-        """
-        Показывает результат полной регистрации.
-        """
         (
             processed_files,
             changed_files,
@@ -648,10 +618,6 @@ class SettingsTab(QWidget):
 
 
 class LogsTab(QWidget):
-    """
-    Вкладка последних логов запусков.
-    """
-
     def __init__(
         self,
         backend: GuiBackend,
@@ -683,9 +649,6 @@ class LogsTab(QWidget):
         layout.addWidget(self._table)
 
     def refresh_data(self) -> None:
-        """
-        Перерисовывает журнал запусков.
-        """
         logs = self._backend.list_logs(limit=100)
         self._table.setRowCount(len(logs))
 
@@ -725,9 +688,6 @@ class LogsTab(QWidget):
             self._table.setCellWidget(row_index, 5, replay_button)
 
     def _replay_action(self, log_id: int) -> None:
-        """
-        Повторяет сохранённое действие из лога в фоне.
-        """
         self._show_status("Повторяется действие из лога...", 0)
         self._run_task(
             lambda: self._backend.replay_log_action(log_id),
@@ -741,9 +701,6 @@ class LogsTab(QWidget):
         success_handler: Callable[[object], None],
         error_title: str,
     ) -> None:
-        """
-        Запускает фоновую задачу.
-        """
         task = BackgroundTask(function, self)
         task.success_handler = success_handler
         task.error_title = error_title
@@ -753,9 +710,6 @@ class LogsTab(QWidget):
 
     @Slot(object, object)
     def _on_task_finished(self, result_obj: object, error_obj: object) -> None:
-        """
-        Получает результат фоновой задачи.
-        """
         sender = self.sender()
         if isinstance(sender, BackgroundTask):
             try:
@@ -772,19 +726,12 @@ class LogsTab(QWidget):
                 sender.success_handler(result_obj)
 
     def _handle_replay_result(self, result_obj: object) -> None:
-        """
-        Обрабатывает результат повтора действия.
-        """
         result_message = cast(str, result_obj)
         self._show_status(result_message, 7000)
         self._refresh_all()
 
 
 class MainWindow(QMainWindow):
-    """
-    Главное окно PContext.
-    """
-
     def __init__(
         self,
         backend: GuiBackend,
@@ -830,64 +777,40 @@ class MainWindow(QMainWindow):
         self.refresh_all()
 
     def show_status_message(self, message: str, timeout_ms: int = 5000) -> None:
-        """
-        Показывает короткое сообщение в строке состояния.
-        """
         self.statusBar().showMessage(message, timeout_ms)
 
     def refresh_all(self) -> None:
-        """
-        Обновляет все вкладки окна.
-        """
         self._services_tab.refresh_data()
         self._scripts_tab.refresh_data()
         self._settings_tab.refresh_data()
         self._logs_tab.refresh_data()
 
     def show_services_tab(self) -> None:
-        """
-        Показывает вкладку сервисов.
-        """
         self.refresh_all()
         self._tab_widget.setCurrentWidget(self._services_tab)
         self.show_normal_activated()
 
     def show_scripts_tab(self) -> None:
-        """
-        Показывает вкладку скриптов.
-        """
         self.refresh_all()
         self._tab_widget.setCurrentWidget(self._scripts_tab)
         self.show_normal_activated()
 
     def show_settings_tab(self) -> None:
-        """
-        Показывает вкладку настроек.
-        """
         self.refresh_all()
         self._tab_widget.setCurrentWidget(self._settings_tab)
         self.show_normal_activated()
 
     def show_logs_tab(self) -> None:
-        """
-        Показывает вкладку логов.
-        """
         self.refresh_all()
         self._tab_widget.setCurrentWidget(self._logs_tab)
         self.show_normal_activated()
 
     def show_normal_activated(self) -> None:
-        """
-        Делает окно видимым и активным.
-        """
         self.show()
         self.raise_()
         self.activateWindow()
 
     def request_exit(self) -> None:
-        """
-        Полностью завершает приложение по команде из tray icon.
-        """
         self._allow_close = True
         self.hide()
         self.close()
@@ -897,9 +820,6 @@ class MainWindow(QMainWindow):
             application.quit()
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
-        """
-        При обычном закрытии окно не убивается, а скрывается в tray.
-        """
         if self._allow_close:
             event.accept()
             return

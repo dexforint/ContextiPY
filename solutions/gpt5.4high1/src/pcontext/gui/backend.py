@@ -27,10 +27,6 @@ from pcontext.storage.models import RegistrationModuleRecord, RunLogRecord
 
 @dataclass(frozen=True, slots=True)
 class ScriptListItem:
-    """
-    Одна строка вкладки со скриптами.
-    """
-
     owner_id: str
     title: str
     description: str | None
@@ -44,10 +40,6 @@ class ScriptListItem:
 
 @dataclass(frozen=True, slots=True)
 class ParameterOwnerDetails:
-    """
-    Полная информация о владельце параметров.
-    """
-
     owner_id: str
     owner_title: str
     owner_kind: Literal["oneshot_script", "service", "service_script"]
@@ -57,10 +49,6 @@ class ParameterOwnerDetails:
 
 @dataclass(frozen=True, slots=True)
 class SharedVenvStatus:
-    """
-    Сводка по общему виртуальному окружению PContext.
-    """
-
     venv_dir: str
     python_executable: str
     site_packages_dir: str
@@ -68,10 +56,6 @@ class SharedVenvStatus:
 
 
 class GuiBackend:
-    """
-    Небольшой фасад над AgentApplication для GUI-слоя.
-    """
-
     SETTINGS_AUTOSTART = "settings.launch_on_startup"
     SETTINGS_DISABLE_NOTIFICATIONS = "settings.disable_notifications"
 
@@ -84,15 +68,9 @@ class GuiBackend:
 
     @property
     def application(self) -> AgentApplication:
-        """
-        Возвращает низкоуровневое приложение-агент.
-        """
         return self._application
 
     def register_and_reload(self) -> tuple[int, int, int, int, int, int, bool]:
-        """
-        Выполняет полную регистрацию скриптов и затем перегружает каталог агента.
-        """
         registration_result = register_scripts(
             self._application.paths,
             state_store=self._application.state_store,
@@ -110,50 +88,34 @@ class GuiBackend:
         )
 
     def reload_registry(self) -> tuple[int, int, int]:
-        """
-        Только перегружает каталог пользовательских скриптов.
-        """
         result = self._application.registry.reload()
         return result.command_count, result.service_count, result.failure_count
 
     def open_scripts_folder(self) -> str:
-        """
-        Открывает папку пользовательских скриптов.
-        """
         ensure_directories(self._application.paths)
         return execute_serialized_action(
             FolderActionModel(path=str(self._application.paths.scripts))
         )
 
     def open_runtime_folder(self) -> str:
-        """
-        Открывает runtime-папку PContext.
-        """
         ensure_directories(self._application.paths)
         return execute_serialized_action(
             FolderActionModel(path=str(self._application.paths.runtime))
         )
 
     def open_launcher_log(self) -> str:
-        """
-        Открывает launcher log в приложении по умолчанию.
-        """
         ensure_directories(self._application.paths)
         log_path = self._application.paths.runtime / "windows-launcher.log"
         log_path.touch(exist_ok=True)
-
         return execute_serialized_action(OpenAction(path=str(log_path)))
 
+    def open_registration_module_source(self, source_file: str) -> str:
+        return execute_serialized_action(OpenAction(path=source_file))
+
     def get_windows_shell_diagnostics(self) -> WindowsShellDiagnostics:
-        """
-        Возвращает сводку по Windows shell dev-layer.
-        """
         return collect_windows_shell_diagnostics(self._application.paths)
 
     def get_shared_venv_status(self) -> SharedVenvStatus:
-        """
-        Возвращает состояние общего виртуального окружения.
-        """
         base_dir = self._application.paths.home
         python_path = get_shared_venv_python(base_dir)
         site_packages_path = get_shared_venv_site_packages(base_dir)
@@ -166,33 +128,25 @@ class GuiBackend:
         )
 
     def list_registration_modules(self) -> list[RegistrationModuleRecord]:
-        """
-        Возвращает снимки регистрации всех известных файлов scripts.
-        """
         return self._application.state_store.list_registration_modules()
 
+    def list_failed_registration_modules(self) -> list[RegistrationModuleRecord]:
+        return [
+            item
+            for item in self._application.state_store.list_registration_modules()
+            if item.status == "error"
+        ]
+
     def list_services(self) -> list[ServiceStatusView]:
-        """
-        Возвращает текущее состояние сервисов.
-        """
         return self._application.registry.list_services()
 
     def start_service(self, service_id: str) -> ServiceControlResult:
-        """
-        Запускает сервис.
-        """
         return self._application.registry.start_service(service_id)
 
     def stop_service(self, service_id: str) -> ServiceControlResult:
-        """
-        Останавливает сервис.
-        """
         return self._application.registry.stop_service(service_id)
 
     def list_script_items(self) -> list[ScriptListItem]:
-        """
-        Возвращает все скрипты и service.script-методы.
-        """
         catalog = self._application.registry.catalog
         service_states = {
             item.service_id: item.running
@@ -245,9 +199,6 @@ class GuiBackend:
         )
 
     def get_parameter_owner(self, owner_id: str) -> ParameterOwnerDetails | None:
-        """
-        Возвращает полную информацию о сущности, у которой можно редактировать параметры.
-        """
         catalog = self._application.registry.catalog
 
         for script in catalog.oneshot_scripts:
@@ -289,9 +240,6 @@ class GuiBackend:
         return None
 
     def save_parameter_values(self, owner_id: str, values: dict[str, Any]) -> None:
-        """
-        Сохраняет параметры сущности.
-        """
         details = self.get_parameter_owner(owner_id)
         if details is None:
             raise RuntimeError(f"Владелец параметров '{owner_id}' не найден.")
@@ -308,28 +256,16 @@ class GuiBackend:
                 )
 
     def reset_parameter_values(self, owner_id: str) -> int:
-        """
-        Сбрасывает все сохранённые параметры сущности.
-        """
         return self._application.state_store.reset_all_parameter_values(owner_id)
 
     def invoke_direct(self, owner_id: str) -> tuple[bool, str]:
-        """
-        Запускает сценарий без shell-контекста.
-        """
         result = self._application.registry.invoke_direct(owner_id)
         return result.accepted, result.message
 
     def list_logs(self, limit: int = 50) -> list[RunLogRecord]:
-        """
-        Возвращает последние записи логов.
-        """
         return self._application.state_store.list_run_logs(limit=limit)
 
     def replay_log_action(self, log_id: int) -> str:
-        """
-        Повторяет сохранённое действие из лога.
-        """
         log_record = self._application.state_store.get_run_log(log_id)
         if log_record is None:
             raise RuntimeError(f"Запись лога с id={log_id} не найдена.")
@@ -341,13 +277,7 @@ class GuiBackend:
         return execute_serialized_action(action)
 
     def get_setting(self, key: str, default: Any) -> Any:
-        """
-        Читает настройку приложения.
-        """
         return self._application.state_store.get_setting(key, default)
 
     def set_setting(self, key: str, value: Any) -> None:
-        """
-        Сохраняет настройку приложения.
-        """
         self._application.state_store.set_setting(key, value)
